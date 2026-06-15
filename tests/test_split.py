@@ -64,6 +64,14 @@ def test_auth_required(client):
     assert client.get("/api/groups").status_code == 401
 
 
+def test_401_omits_www_authenticate(client):
+    """No WWW-Authenticate header — else browsers (iOS PWAs) pop their own
+    native, non-persistent credential dialog instead of our in-app login."""
+    for r in (client.get("/api/groups"), client.get("/api/current")):
+        assert r.status_code == 401
+        assert "www-authenticate" not in {k.lower() for k in r.headers}
+
+
 def test_healthz_open(client):
     assert client.get("/healthz").json() == {"status": "ok"}
 

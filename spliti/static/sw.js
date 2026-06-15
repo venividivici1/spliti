@@ -4,7 +4,7 @@
 //     (so the app opens offline; live data still needs the network).
 //   - static assets (icons/manifest): cache-first.
 //   - everything else (the /api/* JSON, AI streams): straight to network.
-const VERSION = 'spliti-v1';
+const VERSION = 'spliti-v2';
 const SHELL = [
   '/',
   '/manifest.webmanifest',

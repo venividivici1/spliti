@@ -27,21 +27,29 @@ split_app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-security = HTTPBasic()
+# auto_error=False so a missing/invalid header doesn't auto-respond with
+# `WWW-Authenticate: Basic`. That header makes browsers (notably iOS PWAs) pop
+# their own native credential dialog on a 401 fetch — which iOS won't persist,
+# so it reappears every launch. We omit it and let the in-app login handle auth.
+security = HTTPBasic(auto_error=False)
 
 # Ensure the schema exists. The startup lifespan is unreliable for a host-mounted
 # sub-app, so initialise at import time instead.
 db.init_db()
 
 
-def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> None:
+def require_auth(
+    credentials: HTTPBasicCredentials | None = Depends(security),
+) -> None:
     password = get_settings().basic_auth_password
-    if not password or not secrets.compare_digest(
-        credentials.password.encode(), password.encode()
+    if (
+        credentials is None
+        or not password
+        or not secrets.compare_digest(credentials.password.encode(), password.encode())
     ):
-        raise HTTPException(
-            status_code=401, detail="unauthorized", headers={"WWW-Authenticate": "Basic"}
-        )
+        # No WWW-Authenticate header on purpose (see `security` above): the
+        # frontend reads this 401 and shows its own login overlay.
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 def to_paise(amount: float) -> int:
