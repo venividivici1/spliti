@@ -1,0 +1,35 @@
+[project]
+name = "spliti"
+version = "0.1.0"
+description = "A Splitwise-style expense splitter for the Spiti road-trip group."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.28",
+    "pydantic-settings>=2.6",
+    "mistralai>=2.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["spliti*"]
+
+[tool.setuptools.package-data]
+spliti = ["static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=spliti --cov-report=term-missing --cov-fail-under=85"

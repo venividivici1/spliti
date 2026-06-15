@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+
+# virtualenvs
+.venv
+venv/
+
+# secrets
+.env
+.envrc
+
+# local SQLite database (keep split.db out of version control)
+spliti/*.db
+
+# test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/

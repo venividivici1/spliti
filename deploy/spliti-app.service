@@ -1,0 +1,17 @@
+[Unit]
+Description=Spliti expense splitter (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/spliti
+ExecStart=/home/ubuntu/spliti/.venv/bin/uvicorn spliti.app:split_app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=3
+Environment=PATH=/home/ubuntu/spliti/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
