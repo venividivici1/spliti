@@ -181,8 +181,12 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@split_app.get("/", dependencies=[Depends(require_auth)])
+@split_app.get("/")
 def index() -> FileResponse:
+    # The shell is served without auth so it can open instantly (and, on iOS
+    # PWAs, without a native Basic Auth prompt every launch). It carries no group
+    # data — the UI fetches /api/* with an Authorization header it manages, and
+    # those endpoints stay behind Basic Auth.
     return FileResponse(STATIC_DIR / "index.html")
 
 

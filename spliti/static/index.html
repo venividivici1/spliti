@@ -434,10 +434,84 @@ function avatar(name, size) {
 }
 let state = { groups: [], current: null, detail: null, chats: {}, overview: {} };
 
+// ---- auth: send Basic credentials explicitly on every request. ----
+// iOS home-screen PWAs don't share Safari's HTTP Basic Auth cache and don't
+// reattach it to fetch/XHR, so we capture the login once and set the header
+// ourselves (works the same everywhere). Token = base64("user:pass").
+const AUTH_KEY = 'spliti_auth';
+let authToken = localStorage.getItem(AUTH_KEY) || null;
+let loginInFlight = null;
+
+function authHeaders(h) {
+  h = h || {};
+  if (authToken) h['Authorization'] = 'Basic ' + authToken;
+  return h;
+}
+
+// Show the login overlay and resolve once valid credentials are stored.
+// Concurrent 401s share a single prompt via loginInFlight.
+function requestLogin(msg) {
+  if (loginInFlight) return loginInFlight;
+  loginInFlight = new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-ov';
+    ov.innerHTML = `<div class="modal">
+      <div class="modal-title">Sign in to Spliti</div>
+      <div class="modal-msg">${msg || 'Enter the trip password to continue.'}</div>
+      <input id="lg-user" type="text" placeholder="Name (any)" autocomplete="username" style="width:100%;margin-bottom:10px" />
+      <input id="lg-pass" type="password" placeholder="Password" autocomplete="current-password" style="width:100%;margin-bottom:8px" />
+      <div class="modal-msg" id="lg-err" style="color:var(--red);display:none;margin-bottom:10px"></div>
+      <div class="modal-actions"><button data-act="go">Sign in</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add('show'));
+    const user = ov.querySelector('#lg-user');
+    const pass = ov.querySelector('#lg-pass');
+    const err = ov.querySelector('#lg-err');
+    setTimeout(() => pass.focus(), 60);
+    const submit = async () => {
+      const u = (user.value || 'trip').trim() || 'trip';
+      const p = pass.value;
+      if (!p) { pass.focus(); return; }
+      // base64 of "user:pass", unicode-safe.
+      const token = btoa(unescape(encodeURIComponent(u + ':' + p)));
+      const test = await fetch('/api/current', { headers: { Authorization: 'Basic ' + token } });
+      if (test.status === 401) {
+        err.textContent = 'Wrong password — try again.';
+        err.style.display = 'block';
+        pass.value = ''; pass.focus();
+        return;
+      }
+      authToken = token;
+      localStorage.setItem(AUTH_KEY, token);
+      ov.classList.remove('show');
+      setTimeout(() => ov.remove(), 200);
+      loginInFlight = null;
+      resolve(true);
+    };
+    ov.querySelector('[data-act=go]').onclick = submit;
+    pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  });
+  return loginInFlight;
+}
+
+// fetch wrapper: attach auth, and on 401 prompt for login then retry once.
+async function fetchAuthed(url, opt) {
+  opt = opt || {};
+  opt.headers = authHeaders(opt.headers || {});
+  let r = await fetch(url, opt);
+  if (r.status === 401) {
+    await requestLogin();
+    opt.headers = authHeaders(opt.headers);
+    r = await fetch(url, opt);
+  }
+  return r;
+}
+
 async function api(method, path, body) {
   const opt = { method, headers: {} };
   if (body !== undefined) { opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
-  const r = await fetch('/api' + path, opt);
+  const r = await fetchAuthed('/api' + path, opt);
   if (!r.ok) { const t = await r.json().catch(()=>({detail:r.statusText})); throw new Error(t.detail||'error'); }
   return r.json();
 }
@@ -970,7 +1044,7 @@ async function ensureOverview(gid) {
   state.overview[gid] = { text: '', loading: true };
   renderOverviewBox();
   try {
-    const r = await fetch('/api/groups/'+gid+'/ask', {
+    const r = await fetchAuthed('/api/groups/'+gid+'/ask', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ question: OVERVIEW_PROMPT }),
     });
@@ -1043,7 +1117,7 @@ async function sendChat(q) {
   const idx = hist.length - 1;
   chatBusy = true; renderChat();
   try {
-    const r = await fetch('/api/groups/'+gid+'/ask', {
+    const r = await fetchAuthed('/api/groups/'+gid+'/ask', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({question:q, history:priorTurns}),
     });

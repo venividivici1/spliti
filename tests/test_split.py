@@ -68,6 +68,18 @@ def test_healthz_open(client):
     assert client.get("/healthz").json() == {"status": "ok"}
 
 
+def test_shell_is_public_but_api_is_gated(client):
+    """The HTML shell loads without auth (no data in it); /api/* stays gated.
+
+    Keeps the iOS PWA from prompting for Basic Auth on every launch — the page
+    opens, then the UI authenticates /api/* with a header it manages.
+    """
+    shell = client.get("/")
+    assert shell.status_code == 200
+    assert "text/html" in shell.headers["content-type"]
+    assert client.get("/api/current").status_code == 401
+
+
 def test_pwa_assets_open_and_served(client):
     """Manifest, service worker and icons are public (browser fetches them for install)."""
     man = client.get("/manifest.webmanifest")
