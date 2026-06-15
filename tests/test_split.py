@@ -68,6 +68,29 @@ def test_healthz_open(client):
     assert client.get("/healthz").json() == {"status": "ok"}
 
 
+def test_pwa_assets_open_and_served(client):
+    """Manifest, service worker and icons are public (browser fetches them for install)."""
+    man = client.get("/manifest.webmanifest")
+    assert man.status_code == 200
+    assert man.headers["content-type"].startswith("application/manifest+json")
+    assert man.json()["short_name"] == "Spliti"
+
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200
+    assert "javascript" in sw.headers["content-type"]
+    assert sw.headers["service-worker-allowed"] == "/"
+
+    icon = client.get("/icons/icon-512.png")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"] == "image/png"
+
+
+def test_icon_route_rejects_traversal_and_unknown(client):
+    assert client.get("/icons/nope.png").status_code == 404
+    # A traversal attempt must not escape the icons directory.
+    assert client.get("/icons/..%2f..%2fapp.py").status_code == 404
+
+
 def test_equal_expense_balances(client):
     gid, ids = make_group(client)
     r = client.post(

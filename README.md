@@ -14,6 +14,10 @@ integer **paise** throughout, so balances always reconcile exactly.
 - **Balances + settle-up** — net balances per member and a greedy min-cash-flow
   suggestion for who should pay whom.
 - **Soft delete** — deleted expenses stay in history and can be restored.
+- **Installable (PWA)** — "Add to Home Screen" on Android and iOS installs Spliti
+  as a standalone app (web manifest + service worker + icons). The PWA assets
+  (`/manifest.webmanifest`, `/sw.js`, `/icons/*`) are served without auth; the
+  app shell and `/api/*` stay behind Basic Auth.
 - **AI extras (optional, needs `MISTRAL_API_KEY`)**
   - `/api/groups/{id}/ask` — chat Q&A over the group's expenses.
   - `/api/suggest-description` — a time-of-day expense suggestion, optionally
@@ -78,7 +82,7 @@ so UI edits are live on the next page load without a restart.
 
 ```sh
 source .venv/bin/activate
-pytest -q          # 29 tests; enforces ≥85% coverage (see pyproject.toml)
+pytest -q          # 31 tests; enforces ≥85% coverage (see pyproject.toml)
 ```
 
 ## Layout
@@ -93,7 +97,10 @@ spliti/
 ├── db.py         # SQLite schema, connection, idempotent migrations
 ├── split.db      # local SQLite data (git-ignored)
 └── static/
-    └── index.html  # the entire single-file web UI
+    ├── index.html          # the entire single-file web UI
+    ├── manifest.webmanifest # PWA manifest (installable app metadata)
+    ├── sw.js               # service worker (standalone/offline shell)
+    └── icons/              # app icons (Android maskable + iOS apple-touch)
 ```
 
 > Extracted from the `fucku` GitHub-App monorepo, where Spliti previously ran as

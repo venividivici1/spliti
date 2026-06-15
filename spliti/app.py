@@ -186,6 +186,35 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# PWA assets — served without auth so the browser can fetch them for install
+# (Android manifest, iOS apple-touch-icon) and register the service worker.
+# They carry no group data; the app shell and /api/* stay behind auth.
+@split_app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json"
+    )
+
+
+@split_app.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    # Root-scoped (served from "/") so it can control the whole app.
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
+@split_app.get("/icons/{name}", include_in_schema=False)
+def icon(name: str) -> FileResponse:
+    icons_dir = (STATIC_DIR / "icons").resolve()
+    path = (icons_dir / name).resolve()
+    if path.parent != icons_dir or not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path)
+
+
 @split_app.get("/api/current", dependencies=[Depends(require_auth)])
 def current_group() -> dict:
     """Detail of the fixed group the UI uses (prefers DEFAULT_GROUP, else the oldest)."""
