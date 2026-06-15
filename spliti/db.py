@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     description  TEXT NOT NULL,
     amount_paise INTEGER NOT NULL,
     paid_by      INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    -- who recorded the expense (the signed-in member); kept distinct from paid_by.
+    -- NULL on rows created before this was tracked, or if that member is removed.
+    added_by     INTEGER REFERENCES members(id) ON DELETE SET NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     deleted_at   TEXT
 );
@@ -78,3 +81,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # soft-delete support
     if "deleted_at" not in cols("expenses"):
         conn.execute("ALTER TABLE expenses ADD COLUMN deleted_at TEXT")
+    # track who recorded each expense (distinct from who paid)
+    if "added_by" not in cols("expenses"):
+        conn.execute(
+            "ALTER TABLE expenses ADD COLUMN added_by INTEGER REFERENCES members(id)"
+        )

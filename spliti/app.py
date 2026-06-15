@@ -38,9 +38,12 @@ security = HTTPBasic(auto_error=False)
 db.init_db()
 
 
-def require_auth(
+def authed_username(
     credentials: HTTPBasicCredentials | None = Depends(security),
-) -> None:
+) -> str:
+    """Verify the shared password and return the signed-in name (the Basic-auth
+    username). The name identifies which member is acting; it is validated
+    against the group's members where identity matters (see `current_member`)."""
     password = get_settings().basic_auth_password
     if (
         credentials is None
@@ -50,6 +53,11 @@ def require_auth(
         # No WWW-Authenticate header on purpose (see `security` above): the
         # frontend reads this 401 and shows its own login overlay.
         raise HTTPException(status_code=401, detail="unauthorized")
+    return (credentials.username or "").strip()
+
+
+def require_auth(_user: str = Depends(authed_username)) -> None:
+    """Password gate for routes that don't need the caller's identity."""
 
 
 def to_paise(amount: float) -> int:
@@ -112,6 +120,28 @@ def _member_ids(conn, gid: int) -> list[int]:
     )]
 
 
+def _member_by_name(conn, gid: int, name: str) -> dict | None:
+    """Resolve a signed-in name to a member of the group (case-insensitive)."""
+    row = conn.execute(
+        "SELECT id, name FROM members WHERE group_id = ? AND name = ? COLLATE NOCASE",
+        (gid, (name or "").strip()),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _default_group_id(conn) -> int:
+    """The group the UI locks onto: DEFAULT_GROUP if present, else the oldest."""
+    row = (
+        conn.execute(
+            "SELECT id FROM groups WHERE name = ? ORDER BY id LIMIT 1", (DEFAULT_GROUP,)
+        ).fetchone()
+        or conn.execute("SELECT id FROM groups ORDER BY id LIMIT 1").fetchone()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="no group configured")
+    return row["id"]
+
+
 def _group_detail(conn, gid: int) -> dict:
     group = _group_or_404(conn, gid)
     members = [dict(r) for r in conn.execute(
@@ -122,9 +152,12 @@ def _group_detail(conn, gid: int) -> dict:
     expenses = [
         {**dict(r), "deleted": bool(r["deleted_at"])}
         for r in conn.execute(
-            """SELECT e.id, e.description, e.amount_paise, e.paid_by, e.created_at,
-                      e.deleted_at, m.name AS paid_by_name
-               FROM expenses e JOIN members m ON m.id = e.paid_by
+            """SELECT e.id, e.description, e.amount_paise, e.paid_by, e.added_by,
+                      e.created_at, e.deleted_at,
+                      m.name AS paid_by_name, a.name AS added_by_name
+               FROM expenses e
+               JOIN members m ON m.id = e.paid_by
+               LEFT JOIN members a ON a.id = e.added_by
                WHERE e.group_id = ? ORDER BY e.id DESC""",
             (gid,),
         )
@@ -227,20 +260,35 @@ def icon(name: str) -> FileResponse:
     return FileResponse(path)
 
 
+@split_app.get("/api/me")
+def whoami(user: str = Depends(authed_username)) -> dict:
+    """Identify the signed-in member, rejecting names that aren't in the group.
+
+    The frontend calls this at login: 401 = wrong password, 403 = not a member,
+    200 = a valid member (so it knows who is acting when recording expenses)."""
+    conn = db.connect()
+    try:
+        gid = _default_group_id(conn)
+        member = _member_by_name(conn, gid, user)
+        if not member:
+            names = [r["name"] for r in conn.execute(
+                "SELECT name FROM members WHERE group_id = ? ORDER BY id", (gid,)
+            )]
+            raise HTTPException(
+                status_code=403,
+                detail=f"“{user}” isn’t in this group. Sign in as one of: {', '.join(names)}.",
+            )
+        return {"member_id": member["id"], "name": member["name"], "group_id": gid}
+    finally:
+        conn.close()
+
+
 @split_app.get("/api/current", dependencies=[Depends(require_auth)])
 def current_group() -> dict:
     """Detail of the fixed group the UI uses (prefers DEFAULT_GROUP, else the oldest)."""
     conn = db.connect()
     try:
-        row = (
-            conn.execute(
-                "SELECT id FROM groups WHERE name = ? ORDER BY id LIMIT 1", (DEFAULT_GROUP,)
-            ).fetchone()
-            or conn.execute("SELECT id FROM groups ORDER BY id LIMIT 1").fetchone()
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="no group configured")
-        return _group_detail(conn, row["id"])
+        return _group_detail(conn, _default_group_id(conn))
     finally:
         conn.close()
 
@@ -334,11 +382,18 @@ def add_member(gid: int, body: MemberCreate) -> dict:
         conn.close()
 
 
-@split_app.post("/api/groups/{gid}/expenses", dependencies=[Depends(require_auth)])
-def add_expense(gid: int, body: ExpenseCreate) -> dict:
+@split_app.post("/api/groups/{gid}/expenses")
+def add_expense(gid: int, body: ExpenseCreate, user: str = Depends(authed_username)) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
+        # The person recording the expense must be a member of this group — so
+        # we always know who added it, even when paid_by is someone else.
+        adder = _member_by_name(conn, gid, user)
+        if not adder:
+            raise HTTPException(
+                status_code=403, detail="you must sign in as a member of this group"
+            )
         valid = set(_member_ids(conn, gid))
         if not valid:
             raise HTTPException(status_code=422, detail="group has no members yet")
@@ -366,9 +421,9 @@ def add_expense(gid: int, body: ExpenseCreate) -> dict:
                 )
 
         cur = conn.execute(
-            "INSERT INTO expenses (group_id, description, amount_paise, paid_by) "
-            "VALUES (?, ?, ?, ?)",
-            (gid, body.description.strip(), total, body.paid_by),
+            "INSERT INTO expenses (group_id, description, amount_paise, paid_by, added_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (gid, body.description.strip(), total, body.paid_by, adder["id"]),
         )
         eid = cur.lastrowid
         conn.executemany(

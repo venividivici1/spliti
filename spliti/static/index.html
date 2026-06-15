@@ -117,6 +117,14 @@
   .exp.deleted .exp-desc, .exp.deleted .amt { text-decoration: line-through; }
   .exp.clickable { cursor: pointer; }
   .exp.clickable:hover { background: rgba(255,255,255,0.03); border-radius: 8px; }
+  /* paid-by vs added-by, shown in the expense detail (by the split chart) */
+  .who-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+  .who-pill { display: flex; align-items: center; gap: 7px; flex: 1 1 0; min-width: 0;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 8px 11px; font-size: 14px; }
+  .who-pill .who-lbl { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; display: block; line-height: 1.3; }
+  .who-pill b { font-weight: 600; }
   .split-chart { display: flex; justify-content: center; margin: 6px 0 14px; min-height: 40px; }
   .split-chart svg { max-width: 100%; height: auto; }
   .split-list { margin-bottom: 16px; }
@@ -439,7 +447,11 @@ let state = { groups: [], current: null, detail: null, chats: {}, overview: {} }
 // reattach it to fetch/XHR, so we capture the login once and set the header
 // ourselves (works the same everywhere). Token = base64("user:pass").
 const AUTH_KEY = 'spliti_auth';
+const ME_KEY = 'spliti_me';
 let authToken = localStorage.getItem(AUTH_KEY) || null;
+// Who is signed in: { member_id, name } — set once the name is verified as a
+// group member. Used to record who adds an expense and to default "Paid by".
+let me = (() => { try { return JSON.parse(localStorage.getItem(ME_KEY)) || null; } catch (_) { return null; } })();
 let loginInFlight = null;
 
 function authHeaders(h) {
@@ -448,7 +460,13 @@ function authHeaders(h) {
   return h;
 }
 
-// Show the login overlay and resolve once valid credentials are stored.
+function clearAuth() {
+  authToken = null; me = null;
+  localStorage.removeItem(AUTH_KEY); localStorage.removeItem(ME_KEY);
+}
+
+// Show the login overlay and resolve once a valid *member* is signed in.
+// Validates name + password against /api/me, so non-members are rejected here.
 // Concurrent 401s share a single prompt via loginInFlight.
 function requestLogin(msg) {
   if (loginInFlight) return loginInFlight;
@@ -457,9 +475,9 @@ function requestLogin(msg) {
     ov.className = 'modal-ov';
     ov.innerHTML = `<div class="modal">
       <div class="modal-title">Sign in to Spliti</div>
-      <div class="modal-msg">${msg || 'Enter the trip password to continue.'}</div>
-      <input id="lg-user" type="text" placeholder="Name (any)" autocomplete="username" style="width:100%;margin-bottom:10px" />
-      <input id="lg-pass" type="password" placeholder="Password" autocomplete="current-password" style="width:100%;margin-bottom:8px" />
+      <div class="modal-msg">${msg || 'Enter your name and the trip password.'}</div>
+      <input id="lg-user" type="text" placeholder="Your name" autocomplete="username" style="width:100%;margin-bottom:10px" />
+      <input id="lg-pass" type="password" placeholder="Trip password" autocomplete="current-password" style="width:100%;margin-bottom:8px" />
       <div class="modal-msg" id="lg-err" style="color:var(--red);display:none;margin-bottom:10px"></div>
       <div class="modal-actions"><button data-act="go">Sign in</button></div>
     </div>`;
@@ -468,31 +486,52 @@ function requestLogin(msg) {
     const user = ov.querySelector('#lg-user');
     const pass = ov.querySelector('#lg-pass');
     const err = ov.querySelector('#lg-err');
-    setTimeout(() => pass.focus(), 60);
+    if (me && me.name) user.value = me.name;
+    setTimeout(() => (user.value ? pass : user).focus(), 60);
+    const showErr = (t) => { err.textContent = t; err.style.display = 'block'; };
     const submit = async () => {
-      const u = (user.value || 'trip').trim() || 'trip';
+      const u = user.value.trim();
       const p = pass.value;
+      if (!u) { showErr('Enter your name.'); user.focus(); return; }
       if (!p) { pass.focus(); return; }
-      // base64 of "user:pass", unicode-safe.
+      // base64 of "name:password", unicode-safe.
       const token = btoa(unescape(encodeURIComponent(u + ':' + p)));
-      const test = await fetch('/api/current', { headers: { Authorization: 'Basic ' + token } });
-      if (test.status === 401) {
-        err.textContent = 'Wrong password — try again.';
-        err.style.display = 'block';
-        pass.value = ''; pass.focus();
+      let r;
+      try { r = await fetch('/api/me', { headers: { Authorization: 'Basic ' + token } }); }
+      catch (_) { showErr('Network error — try again.'); return; }
+      if (r.status === 401) { showErr('Wrong password — try again.'); pass.value = ''; pass.focus(); return; }
+      if (r.status === 403) {
+        const t = await r.json().catch(() => ({}));
+        showErr(t.detail || 'That name isn’t in the group.'); user.focus();
         return;
       }
+      if (!r.ok) { showErr('Couldn’t sign in — try again.'); return; }
       authToken = token;
+      me = await r.json();
       localStorage.setItem(AUTH_KEY, token);
+      localStorage.setItem(ME_KEY, JSON.stringify(me));
       ov.classList.remove('show');
       setTimeout(() => ov.remove(), 200);
       loginInFlight = null;
       resolve(true);
     };
     ov.querySelector('[data-act=go]').onclick = submit;
-    pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    [user, pass].forEach(el => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); }));
   });
   return loginInFlight;
+}
+
+// Guarantee a signed-in member before loading data. Validates any stored token
+// (it may predate member checks, or the name may have been removed).
+async function ensureAuth() {
+  if (authToken) {
+    try {
+      const r = await fetch('/api/me', { headers: authHeaders({}) });
+      if (r.ok) { me = await r.json(); localStorage.setItem(ME_KEY, JSON.stringify(me)); return; }
+    } catch (_) { return; }  // offline: keep going with the cached shell
+    clearAuth();
+  }
+  await requestLogin();
 }
 
 // fetch wrapper: attach auth, and on 401 prompt for login then retry once.
@@ -501,6 +540,7 @@ async function fetchAuthed(url, opt) {
   opt.headers = authHeaders(opt.headers || {});
   let r = await fetch(url, opt);
   if (r.status === 401) {
+    clearAuth();
     await requestLogin();
     opt.headers = authHeaders(opt.headers);
     r = await fetch(url, opt);
@@ -518,6 +558,7 @@ async function api(method, path, body) {
 
 async function loadCurrent() {
   try {
+    await ensureAuth();
     state.detail = await api('GET','/current');
     state.current = state.detail.group.id;
   } catch(e) {
@@ -763,6 +804,8 @@ function wireExpenseForm(d) {
   const pb = $('#ePaidBy');
   const key = 'split.paidBy.' + d.group.id;
   const saved = localStorage.getItem(key);
+  // Default the payer to whoever is signed in; a saved choice still wins.
+  if (me && [...pb.options].some(o => o.value === String(me.member_id))) pb.value = String(me.member_id);
   if (saved && [...pb.options].some(o => o.value === saved)) pb.value = saved;
   pb.onchange = () => localStorage.setItem(key, pb.value);
   renderSplitArea();
@@ -809,7 +852,7 @@ function expRow(e) {
     <div class="exp clickable ${e.deleted?'deleted':''}" data-exp="${e.id}">
       <div class="exp-main">${avatar(e.paid_by_name)}
         <div><div class="exp-desc">${esc(e.description)}</div>
-          <div class="meta">${esc(e.paid_by_name)} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}</div></div></div>
+          <div class="meta">${esc(e.paid_by_name)}${e.added_by_name && e.added_by !== e.paid_by ? ` · added by ${esc(e.added_by_name)}` : ''} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}</div></div></div>
       <div class="exp-right">
         <span class="amt">${fmt(e.amount_paise)}</span>
         ${e.deleted
@@ -1203,7 +1246,11 @@ function expenseModal(e) {
   ov.className = 'modal-ov';
   ov.innerHTML = `<div class="modal">
     <div class="modal-title">${esc(e.description)}${e.deleted ? ' <span class="muted">(deleted)</span>' : ''}</div>
-    <div class="modal-msg">${fmt(e.amount_paise)} · paid by <b>${esc(e.paid_by_name)}</b> · ${fmtDate(e.created_at)}</div>
+    <div class="modal-msg">${fmt(e.amount_paise)} · ${fmtDate(e.created_at)}</div>
+    <div class="who-row">
+      <span class="who-pill">${avatar(e.paid_by_name, 22)}<span><span class="who-lbl">Paid by</span> <b>${esc(e.paid_by_name)}</b></span></span>
+      <span class="who-pill">${e.added_by_name ? avatar(e.added_by_name, 22) : ''}<span><span class="who-lbl">Added by</span> <b>${e.added_by_name ? esc(e.added_by_name) : '—'}</b></span></span>
+    </div>
     <div id="splitChart" class="split-chart"><span class="muted">Loading chart…</span></div>
     <div class="split-list">${shares.length ? shares.map(s=>`
       <div class="bal"><span>${esc(s.name)}</span><span>${fmt(s.share_paise)}</span></div>`).join('') : '<div class="muted">No split details.</div>'}</div>

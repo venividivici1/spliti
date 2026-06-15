@@ -5,7 +5,9 @@ from spliti import ask, balances, db
 from spliti.app import split_app
 from tests.conftest import TEST_PASSWORD
 
-AUTH = ("anyone", TEST_PASSWORD)
+# "Ada" is a member created by make_group(); expense creation now requires the
+# signed-in name to be a group member, so the username can't be arbitrary.
+AUTH = ("Ada", TEST_PASSWORD)
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +255,42 @@ def test_payer_must_be_member(client):
         auth=AUTH,
     )
     assert r.status_code == 422
+
+
+def test_me_identifies_member_and_rejects_strangers(client):
+    make_group(client, name="Spiti", members=("Ada", "Bo"))
+    ok = client.get("/api/me", auth=("Ada", TEST_PASSWORD))
+    assert ok.status_code == 200 and ok.json()["name"] == "Ada"
+    # name matching is case-insensitive
+    assert client.get("/api/me", auth=("ada", TEST_PASSWORD)).status_code == 200
+    # right password, but not a member -> 403 (rejected at login)
+    assert client.get("/api/me", auth=("Mallory", TEST_PASSWORD)).status_code == 403
+    # wrong password -> 401
+    assert client.get("/api/me", auth=("Ada", "nope")).status_code == 401
+
+
+def test_non_member_cannot_add_expense(client):
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    r = client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Sneaky", "amount": 10, "paid_by": ids["Ada"]},
+        auth=("Mallory", TEST_PASSWORD),
+    )
+    assert r.status_code == 403
+
+
+def test_added_by_is_recorded_and_distinct_from_paid_by(client):
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    # Ada records an expense that Bo paid for.
+    client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Fuel", "amount": 40, "paid_by": ids["Bo"]},
+        auth=("Ada", TEST_PASSWORD),
+    )
+    exp = client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"][0]
+    assert exp["paid_by_name"] == "Bo"
+    assert exp["added_by_name"] == "Ada"
+    assert exp["added_by"] == ids["Ada"]
 
 
 def test_build_context_includes_data(client):

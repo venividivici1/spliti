@@ -13,6 +13,10 @@ integer **paise** throughout, so balances always reconcile exactly.
   deterministically) or specify exact per-member shares that must sum to the total.
 - **Balances + settle-up** — net balances per member and a greedy min-cash-flow
   suggestion for who should pay whom.
+- **Member sign-in + attribution** — you sign in with your name (must be one of
+  the group's members; `GET /api/me` validates it). Each expense records both
+  who **paid** and who **added** it (`added_by`), shown side by side in the
+  expense detail; an arbitrary name can't post expenses.
 - **Soft delete** — deleted expenses stay in history and can be restored.
 - **Installable (PWA)** — "Add to Home Screen" on Android and iOS installs Spliti
   as a standalone app (web manifest + service worker + icons). The PWA assets
@@ -82,7 +86,7 @@ so UI edits are live on the next page load without a restart.
 
 ```sh
 source .venv/bin/activate
-pytest -q          # 31 tests; enforces ≥85% coverage (see pyproject.toml)
+pytest -q          # 36 tests; enforces ≥85% coverage (see pyproject.toml)
 ```
 
 ## Layout
