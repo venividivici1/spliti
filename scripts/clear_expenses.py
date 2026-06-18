@@ -1,14 +1,16 @@
 """Clear expenses from the Spliti database.
 
 Hard-deletes expense rows (their `expense_shares` go too, via ON DELETE CASCADE).
-Destructive and irreversible — it prints what it will remove and asks before doing
-it, unless you pass --yes. Settlements are left alone unless --include-settlements.
+Settlements for the same scope are cleared too by default. Destructive and
+irreversible — it prints what it will remove and asks before doing it, unless you
+pass --yes. Pass --keep-settlements to leave settlements untouched; --deleted-only
+purges only soft-deleted expenses and never touches settlements.
 
-    python scripts/clear_expenses.py                  # all expenses, with a prompt
-    python scripts/clear_expenses.py --group Spiti     # only that group's expenses
-    python scripts/clear_expenses.py --deleted-only    # purge only soft-deleted ones
-    python scripts/clear_expenses.py --include-settlements --yes
-    python scripts/clear_expenses.py --dry-run         # show counts, change nothing
+    python scripts/clear_expenses.py                    # all expenses + settlements, with a prompt
+    python scripts/clear_expenses.py --group Spiti       # only that group's expenses + settlements
+    python scripts/clear_expenses.py --keep-settlements  # clear expenses but keep settlements
+    python scripts/clear_expenses.py --deleted-only      # purge only soft-deleted expenses
+    python scripts/clear_expenses.py --dry-run           # show counts, change nothing
 
 Targets spliti/split.db by default; override with --db or the usual DB_PATH the app
 uses. Back the file up first if you might want the data back.
@@ -66,8 +68,8 @@ def main() -> None:
         help="only purge soft-deleted expenses (clear the trash)",
     )
     ap.add_argument(
-        "--include-settlements", action="store_true",
-        help="also delete settlements for the same scope",
+        "--keep-settlements", action="store_true",
+        help="keep settlements (by default a full clear deletes them too)",
     )
     ap.add_argument("--dry-run", action="store_true", help="show counts, change nothing")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
@@ -86,6 +88,10 @@ def main() -> None:
     try:
         gid = _resolve_group(conn, args.group)
         where, params = _where(gid, args.deleted_only)
+        # Clear settlements alongside expenses by default. Skip on --deleted-only
+        # (there's no "soft-deleted settlement" — that mode only purges expense
+        # trash) and when the caller opts out with --keep-settlements.
+        clear_settlements = not args.keep_settlements and not args.deleted_only
 
         n_exp = conn.execute(
             f"SELECT COUNT(*) c FROM expenses{where}", params
@@ -104,7 +110,7 @@ def main() -> None:
         print(f"  expense_shares: {n_shares} (cascade)")
 
         n_settle = 0
-        if args.include_settlements:
+        if clear_settlements:
             swhere, sparams = (" WHERE group_id = ?", [gid]) if gid is not None else ("", [])
             n_settle = conn.execute(
                 f"SELECT COUNT(*) c FROM settlements{swhere}", sparams
@@ -125,12 +131,12 @@ def main() -> None:
 
         # Deleting the expense rows cascades to expense_shares (foreign_keys = ON).
         conn.execute(f"DELETE FROM expenses{where}", params)
-        if args.include_settlements:
+        if clear_settlements:
             swhere, sparams = (" WHERE group_id = ?", [gid]) if gid is not None else ("", [])
             conn.execute(f"DELETE FROM settlements{swhere}", sparams)
         conn.commit()
         print(f"Deleted {n_exp} expense(s), {n_shares} share(s)"
-              + (f", {n_settle} settlement(s)" if args.include_settlements else "")
+              + (f", {n_settle} settlement(s)" if clear_settlements else "")
               + ".")
 
         if not args.no_firestore:
