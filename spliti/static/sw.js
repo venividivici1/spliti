@@ -4,7 +4,7 @@
 //     (so the app opens offline; live data still needs the network).
 //   - static assets (icons/manifest): cache-first.
 //   - everything else (the /api/* JSON, AI streams): straight to network.
-const VERSION = 'spliti-v5';
+const VERSION = 'spliti-v6';
 const SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -76,20 +76,15 @@ self.addEventListener('fetch', (event) => {
 });
 
 // ---- Web Push ----
-// If the app is open and on-screen, sync in place instead of interrupting with a
-// banner (the page reuses its normal flush()). Otherwise — closed, backgrounded,
-// or a hidden tab — show the notification. Suppressing the banner is allowed by
-// the userVisibleOnly contract precisely because a visible client exists.
+// Always show a banner so the event lands in the notification tray, and also nudge
+// any open window to refresh in place (the page reuses its normal flush()), so a
+// member looking at the app sees the change live as well as in the tray.
 self.addEventListener('push', (event) => {
   let d = {};
   try { d = event.data ? event.data.json() : {}; } catch (_) { /* keep defaults */ }
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const visible = wins.find((c) => c.visibilityState === 'visible');
-    if (visible) {
-      visible.postMessage({ type: 'sync' });
-      return;
-    }
+    for (const c of wins) c.postMessage({ type: 'sync' });
     await self.registration.showNotification(d.title || 'Spliti', {
       body: d.body || '',
       icon: '/icons/icon-192.png',
