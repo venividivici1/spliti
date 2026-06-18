@@ -18,3 +18,8 @@ spliti/*.db
 htmlcov/
 *.egg-info/
 vapid_private.pem
+
+# Google Cloud service-account keys (Firestore mirror credentials)
+*-service-account.json
+service-account*.json
+gcp-credentials*.json

@@ -16,7 +16,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from spliti.config import get_settings
-from spliti import ask, balances, db, notifications
+from spliti import ask, balances, db, firestore_sync, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -533,11 +533,12 @@ def list_groups() -> dict:
 
 
 @split_app.post("/api/groups", dependencies=[Depends(require_auth)])
-def create_group(body: GroupCreate) -> dict:
+def create_group(body: GroupCreate, background_tasks: BackgroundTasks) -> dict:
     conn = db.connect()
     try:
         cur = conn.execute("INSERT INTO groups (name) VALUES (?)", (body.name.strip(),))
         conn.commit()
+        background_tasks.add_task(firestore_sync.mirror_group, cur.lastrowid)
         return {"id": cur.lastrowid, "name": body.name.strip()}
     finally:
         conn.close()
@@ -615,19 +616,20 @@ def export_csv(gid: int) -> StreamingResponse:
 
 
 @split_app.delete("/api/groups/{gid}", dependencies=[Depends(require_auth)])
-def delete_group(gid: int) -> dict:
+def delete_group(gid: int, background_tasks: BackgroundTasks) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
         conn.execute("DELETE FROM groups WHERE id = ?", (gid,))
         conn.commit()
+        background_tasks.add_task(firestore_sync.delete_group, gid)
         return {"deleted": gid}
     finally:
         conn.close()
 
 
 @split_app.post("/api/groups/{gid}/members", dependencies=[Depends(require_auth)])
-def add_member(gid: int, body: MemberCreate) -> dict:
+def add_member(gid: int, body: MemberCreate, background_tasks: BackgroundTasks) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
@@ -642,6 +644,7 @@ def add_member(gid: int, body: MemberCreate) -> dict:
             "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, name)
         )
         conn.commit()
+        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": cur.lastrowid, "name": name, "group_id": gid}
     finally:
         conn.close()
@@ -731,6 +734,7 @@ def add_expense(
                 notifications.dispatch, gid, "new_expense", adder["id"],
                 list(set(share_map) | {body.paid_by}), _net_by_member(detail), summary,
             )
+        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": eid}
     finally:
         conn.close()
@@ -756,8 +760,9 @@ def delete_expense(
             (eid,),
         )
         conn.commit()
-        if cur.rowcount:  # only notify on a real state change (not a replayed delete)
+        if cur.rowcount:  # only notify/mirror on a real state change (not a replayed delete)
             _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=False)
+            background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"deleted": eid}
     finally:
         conn.close()
@@ -783,6 +788,7 @@ def restore_expense(
         conn.commit()
         if cur.rowcount:
             _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=True)
+            background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"restored": eid}
     finally:
         conn.close()
@@ -854,6 +860,7 @@ def add_settlement(
                 actor["id"] if actor else None,
                 [body.from_member, body.to_member], _net_by_member(detail), summary,
             )
+        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": cur.lastrowid}
     finally:
         conn.close()

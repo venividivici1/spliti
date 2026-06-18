@@ -14,6 +14,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Cloud Firestore mirror (optional feature; see spliti/firestore_sync.py).
+# Install with `pip install -e ".[firestore]"` to enable the cloud backup path.
+firestore = [
+    "google-cloud-firestore>=2.16",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

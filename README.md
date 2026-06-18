@@ -26,6 +26,11 @@ integer **paise** throughout, so balances always reconcile exactly.
   - `/api/groups/{id}/ask` — chat Q&A over the group's expenses.
   - `/api/suggest-description` — a time-of-day expense suggestion, optionally
     location-tagged via OpenStreetMap reverse-geocoding.
+- **Cloud Firestore mirror (optional, needs `FIRESTORE_PROJECT_ID`)** — SQLite
+  stays the source of truth; when configured, each write is mirrored to Cloud
+  Firestore in the background as a self-healing full-group snapshot (handy for
+  backup or a second consumer). Disabled by default — the app runs on SQLite
+  alone. See [Cloud Firestore mirror](#cloud-firestore-mirror-optional).
 
 The UI locks onto a single group (`DEFAULT_GROUP = "Spiti"`); group/member
 management happens out of band against the API.
@@ -82,11 +87,41 @@ sudo journalctl -u spliti-app.service -f      # tail logs
 The frontend is a single static `spliti/static/index.html` served per request,
 so UI edits are live on the next page load without a restart.
 
+## Cloud Firestore mirror (optional)
+
+Spliti can mirror its data to **Google Cloud Firestore** for an off-box backup
+copy. SQLite remains the source of truth; after each write, a background task
+re-writes a full snapshot of the affected group to Firestore, keyed by the
+SQLite row ids — so the mirror is idempotent and self-healing. With no project
+configured the mirror is a complete no-op and the app runs on SQLite alone.
+
+```sh
+pip install -e ".[firestore]"        # the extra deps (google-cloud-firestore)
+
+# in .env
+FIRESTORE_PROJECT_ID=my-gcp-project
+FIRESTORE_CREDENTIALS=/path/to/service-account.json   # optional; omit to use ADC
+```
+
+If `FIRESTORE_CREDENTIALS` is omitted, the client falls back to Application
+Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, a `gcloud auth` login, or
+GCE/Cloud Run metadata). Firestore layout:
+
+```
+groups/{gid}
+├─ members/{member_id}
+├─ expenses/{expense_id}      # includes the soft-delete flag + embedded shares
+└─ settlements/{settlement_id}
+```
+
+The mirror is best-effort: any Firestore failure is swallowed so it never
+affects the request or the local SQLite write.
+
 ## Tests
 
 ```sh
 source .venv/bin/activate
-pytest -q          # 36 tests; enforces ≥85% coverage (see pyproject.toml)
+pytest -q          # 82 tests; enforces ≥85% coverage (see pyproject.toml)
 ```
 
 ## Layout
@@ -99,6 +134,7 @@ spliti/
 ├── ask.py        # AI Q&A + description suggestions + reverse-geocoding
 ├── balances.py   # net-balance + settle-up math (pure, integer paise)
 ├── db.py         # SQLite schema, connection, idempotent migrations
+├── firestore_sync.py # optional Cloud Firestore mirror (SQLite is source of truth)
 ├── split.db      # local SQLite data (git-ignored)
 └── static/
     ├── index.html          # the entire single-file web UI
