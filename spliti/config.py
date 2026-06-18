@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     vapid_public_key: str = ""
     vapid_subject: str = "mailto:admin@example.com"
 
+    # Cloud Firestore mirror (optional). SQLite stays the source of truth; when
+    # firestore_project_id is set, each write is mirrored to Firestore in the
+    # background. Leave it empty to run on SQLite alone (the mirror no-ops).
+    # firestore_credentials is a path to a service-account JSON key; if omitted,
+    # the client uses Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS,
+    # gcloud login, or GCE/Cloud Run metadata).
+    firestore_project_id: str = ""
+    firestore_credentials: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
