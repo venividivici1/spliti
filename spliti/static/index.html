@@ -813,15 +813,21 @@ async function sendOp(op) {
 
 let flushing = false;
 async function flush() {
-  if (flushing || !navigator.onLine) { updateNetBadge(); return; }
+  // Only the overlap guard blocks here — we deliberately don't gate on
+  // navigator.onLine. It's unreliable (can stay false after a real reconnect,
+  // and the 'online' event doesn't always fire), so we just attempt the network
+  // and let a failure mean "still offline". This is what makes a reconnect
+  // actually pull fresh data.
+  if (flushing) { updateNetBadge(); return; }
   flushing = true;
+  updateNetBadge();
   try {
-    while (outbox.length && navigator.onLine) {
+    while (outbox.length) {
       const op = outbox[0];
       try { await sendOp(op); }
       catch (e) {
         // Transient (offline / 5xx): stop and keep the whole queue intact so no
-        // write is ever lost — we retry on the next online event or load.
+        // write is ever lost — we retry on the next tick, focus, or online event.
         if (e.retriable) break;
         // Permanent client rejection (4xx): drop just this op so it can't wedge
         // the queue forever; the rest still sync.
@@ -830,17 +836,19 @@ async function flush() {
       }
       outbox.shift(); saveOutbox();
     }
-    // Caught up and online: pull canonical server state (real ids, timestamps,
-    // and anything other members added). Only re-render when it actually changed,
-    // so the periodic background pull doesn't disrupt the open tab.
-    if (!outbox.length && navigator.onLine && state.current) {
+    // Caught up: pull canonical server state (real ids, timestamps, and anything
+    // other members added). Attempt regardless of navigator.onLine; a network
+    // failure just means we're still offline and we keep the cached state. Only
+    // re-render when it actually changed, so the background pull doesn't disrupt
+    // the open tab.
+    if (!outbox.length && state.current) {
       try {
         const fresh = await api('GET', '/current');
         const changed = detailSig(fresh) !== detailSig(state.detail);
         state.detail = fresh; state.current = fresh.group.id;
         saveSnapshot();
         if (changed) { delete state.overview[state.current]; renderMain(); }
-      } catch (_) { /* connection dropped again — keep showing optimistic state */ }
+      } catch (_) { /* still offline — keep showing cached/optimistic state */ }
     }
   } finally { flushing = false; updateNetBadge(); }
 }
@@ -1656,15 +1664,21 @@ function expenseAddedModal() {
 }
 
 updateNetBadge();
-$('#netBadge').onclick = () => { if (navigator.onLine) flush(); else toast('Offline — your changes are saved and will sync automatically.'); };
+$('#netBadge').onclick = () => {
+  if (!navigator.onLine && pendingCount()) toast('Offline — your changes are saved and will sync automatically.');
+  flush();  // always attempt: navigator.onLine may be wrong, so let the fetch decide
+};
 loadCurrent();
 
 // Background sync: periodically retry the outbox and pull in anything other
-// members added. flush() is a no-op offline and guards against overlap, so this
-// is safe to fire on a timer, on regaining focus, and on reconnect.
+// members added. flush() guards against overlap and attempts the network itself
+// (it doesn't trust navigator.onLine), so firing it on a timer, on regaining
+// focus/visibility, and on the 'online' event means a reconnect is picked up
+// within one interval even when the 'online' event never fires.
 const SYNC_INTERVAL_MS = 20000;
 setInterval(() => { if (state.current) flush(); }, SYNC_INTERVAL_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.current) flush(); });
+window.addEventListener('focus', () => { if (state.current) flush(); });
 
 // Register the service worker so the app is installable / works standalone.
 if ('serviceWorker' in navigator) {
