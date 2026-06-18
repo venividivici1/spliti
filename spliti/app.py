@@ -5,6 +5,7 @@ Money crosses the API as decimal amounts but is stored/computed as integer paise
 """
 
 import secrets
+import sqlite3
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -128,7 +129,10 @@ def _existing_by_client_id(conn, table: str, gid: int, client_id: str | None) ->
     """Return the id of an already-stored row for this client_id, if any.
 
     Lets a write that was created offline and replayed on reconnect resolve to
-    the same row instead of inserting a duplicate (idempotent sync)."""
+    the same row instead of inserting a duplicate (idempotent sync).
+
+    ``table`` is interpolated into the SQL, so callers must pass a trusted
+    literal (only "expenses"/"settlements"), never user input."""
     if not client_id:
         return None
     row = conn.execute(
@@ -443,18 +447,28 @@ def add_expense(gid: int, body: ExpenseCreate, user: str = Depends(authed_userna
                     status_code=422, detail="shares must sum to the total amount"
                 )
 
-        cur = conn.execute(
-            "INSERT INTO expenses "
-            "(group_id, description, amount_paise, paid_by, added_by, client_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id),
-        )
-        eid = cur.lastrowid
-        conn.executemany(
-            "INSERT INTO expense_shares (expense_id, member_id, share_paise) VALUES (?, ?, ?)",
-            [(eid, m, c) for m, c in share_map.items()],
-        )
-        conn.commit()
+        try:
+            cur = conn.execute(
+                "INSERT INTO expenses "
+                "(group_id, description, amount_paise, paid_by, added_by, client_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id),
+            )
+            eid = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO expense_shares (expense_id, member_id, share_paise) VALUES (?, ?, ?)",
+                [(eid, m, c) for m, c in share_map.items()],
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # A concurrent replay of the same client_id won the race and inserted
+            # first (the check above and this insert aren't atomic). Resolve to the
+            # row that landed instead of failing — keeps replay exactly-once.
+            conn.rollback()
+            dup = _existing_by_client_id(conn, "expenses", gid, body.client_id)
+            if dup is not None:
+                return {"id": dup, "duplicate": True}
+            raise
         return {"id": eid}
     finally:
         conn.close()
@@ -531,13 +545,22 @@ def add_settlement(gid: int, body: SettlementCreate) -> dict:
             raise HTTPException(status_code=422, detail="member not in this group")
         if body.from_member == body.to_member:
             raise HTTPException(status_code=422, detail="cannot settle with yourself")
-        cur = conn.execute(
-            "INSERT INTO settlements "
-            "(group_id, from_member, to_member, amount_paise, client_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (gid, body.from_member, body.to_member, to_paise(body.amount), body.client_id),
-        )
-        conn.commit()
+        try:
+            cur = conn.execute(
+                "INSERT INTO settlements "
+                "(group_id, from_member, to_member, amount_paise, client_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (gid, body.from_member, body.to_member, to_paise(body.amount), body.client_id),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # Concurrent replay of the same client_id won the race — resolve to the
+            # row that landed rather than 500 (see add_expense).
+            conn.rollback()
+            dup = _existing_by_client_id(conn, "settlements", gid, body.client_id)
+            if dup is not None:
+                return {"id": dup, "duplicate": True}
+            raise
         return {"id": cur.lastrowid}
     finally:
         conn.close()

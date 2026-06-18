@@ -768,3 +768,29 @@ def test_replay_after_lost_response_does_not_double(client):
     again = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()  # retry
     assert again["id"] == first["id"] and again.get("duplicate") is True
     assert len(client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"]) == 1
+
+
+def test_concurrent_replay_resolves_via_unique_index(client, monkeypatch):
+    """When the pre-check SELECT loses the race (doesn't see the row that another
+    concurrent replay just inserted), the INSERT hits the unique index. The
+    IntegrityError handler must re-resolve to the existing row, not 500."""
+    import spliti.app as app_mod
+
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    real = app_mod._existing_by_client_id
+    calls = {"n": 0}
+
+    def fake(conn, table, gid_, cid):
+        calls["n"] += 1
+        # First two calls are the pre-checks (both "miss"); the third is the
+        # except-block re-resolve, which uses the real lookup.
+        return None if calls["n"] <= 2 else real(conn, table, gid_, cid)
+
+    monkeypatch.setattr(app_mod, "_existing_by_client_id", fake)
+    body = {"description": "Race", "amount": 10, "paid_by": ids["Ada"], "client_id": "race-1"}
+    first = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()
+    second = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH)
+    assert second.status_code == 200
+    second = second.json()
+    assert second["id"] == first["id"] and second.get("duplicate") is True
+    assert len(client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"]) == 1

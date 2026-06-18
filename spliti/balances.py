@@ -1,4 +1,8 @@
-"""Balance computation and settle-up suggestions. All amounts in integer paise."""
+"""Balance computation and settle-up suggestions. All amounts in integer paise.
+
+NOTE: spliti/static/index.html mirrors this logic in JS (splitEqually /
+recomputeDetail / suggestSettlements) so balances recompute offline. Any change to
+the rounding or settle-up algorithm here must be reflected there to avoid drift."""
 
 
 def split_equally(amount_paise: int, member_ids: list[int]) -> dict[int, int]:

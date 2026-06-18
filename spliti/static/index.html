@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#0f1419" />
 <title>Spliti · Spiti trip expenses</title>
 <!-- PWA: installable on Android (manifest) and iOS (apple-touch-icon + standalone) -->
@@ -42,6 +42,9 @@
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
+  /* Suppress the double-tap-to-zoom jump on taps without disabling pinch-zoom
+     (keeps it accessible — WCAG 1.4.4). */
+  button, .seg, .tabs, .bottomnav, .syncbtn, .theme-toggle { touch-action: manipulation; }
   body { margin: 0; font: 16px/1.55 var(--font-body);
     background:
       radial-gradient(1100px 460px at 100% -8%, rgba(45,212,167,0.10), transparent 60%),
@@ -658,12 +661,19 @@ const uuid = () => (crypto.randomUUID
   ? crypto.randomUUID()
   : 'c-' + Date.now().toString(36) + '-' + Math.random().toString(16).slice(2));
 
-let outbox = (() => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch (_) { return []; } })();
+const readOutbox = () => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch (_) { return []; } };
+let outbox = readOutbox();
 const pendingCount = () => outbox.length;
 function saveOutbox() {
   try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox)); } catch (_) {}
   updateNetBadge();
 }
+// Another instance (a second tab / browser sharing this device) changed the queue:
+// adopt it so we don't overwrite each other's pending writes. Skipped mid-flush to
+// avoid yanking the op we're currently sending.
+window.addEventListener('storage', e => {
+  if (e.key === OUTBOX_KEY && !flushing) { outbox = readOutbox(); updateNetBadge(); }
+});
 
 const snapKey = gid => SNAP_PREFIX + gid;
 function saveSnapshot() {
@@ -761,6 +771,9 @@ function queueMutation(op, applyFn) {
   if (op.body) op.body.client_id = op.client_id;   // server-side dedup key
   applyFn(state.detail, op);
   saveSnapshot();
+  // Re-read first so a write queued by another instance isn't clobbered when we
+  // persist (the in-memory copy may be stale). Not done mid-flush.
+  if (!flushing) outbox = readOutbox();
   outbox.push(op); saveOutbox();
   renderMain();
   flush();
