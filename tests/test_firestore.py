@@ -122,9 +122,9 @@ def make_group(client, name="Trip", members=("Ada", "Bo", "Cy")):
 
 def test_group_and_members_are_mirrored(client, fs):
     gid, ids = make_group(client)
-    assert fs.docs[f"groups/{gid}"]["name"] == "Trip"
+    assert fs.docs[f"{firestore_sync.COLLECTION}/{gid}"]["name"] == "Trip"
     for name, mid in ids.items():
-        assert fs.docs[f"groups/{gid}/members/{mid}"]["name"] == name
+        assert fs.docs[f"{firestore_sync.COLLECTION}/{gid}/members/{mid}"]["name"] == name
 
 
 def test_expense_mirrored_with_embedded_shares(client, fs):
@@ -134,7 +134,7 @@ def test_expense_mirrored_with_embedded_shares(client, fs):
         json={"description": "Dinner", "amount": 30, "paid_by": ids["Ada"]},
         auth=AUTH,
     ).json()["id"]
-    doc = fs.docs[f"groups/{gid}/expenses/{eid}"]
+    doc = fs.docs[f"{firestore_sync.COLLECTION}/{gid}/expenses/{eid}"]
     assert doc["description"] == "Dinner"
     assert doc["amount_paise"] == 3000
     assert doc["paid_by"] == ids["Ada"]
@@ -151,9 +151,9 @@ def test_soft_delete_then_restore_round_trips_the_flag(client, fs):
         auth=AUTH,
     ).json()["id"]
     client.delete(f"/api/groups/{gid}/expenses/{eid}", auth=AUTH)
-    assert fs.docs[f"groups/{gid}/expenses/{eid}"]["deleted"] is True
+    assert fs.docs[f"{firestore_sync.COLLECTION}/{gid}/expenses/{eid}"]["deleted"] is True
     client.post(f"/api/groups/{gid}/expenses/{eid}/restore", auth=AUTH)
-    assert fs.docs[f"groups/{gid}/expenses/{eid}"]["deleted"] is False
+    assert fs.docs[f"{firestore_sync.COLLECTION}/{gid}/expenses/{eid}"]["deleted"] is False
 
 
 def test_settlement_is_mirrored(client, fs):
@@ -163,7 +163,7 @@ def test_settlement_is_mirrored(client, fs):
         json={"from_member": ids["Bo"], "to_member": ids["Ada"], "amount": 5},
         auth=AUTH,
     ).json()["id"]
-    doc = fs.docs[f"groups/{gid}/settlements/{sid}"]
+    doc = fs.docs[f"{firestore_sync.COLLECTION}/{gid}/settlements/{sid}"]
     assert doc["from_member"] == ids["Bo"] and doc["amount_paise"] == 500
 
 
@@ -174,9 +174,9 @@ def test_delete_group_clears_the_subtree(client, fs):
         json={"description": "X", "amount": 10, "paid_by": ids["Ada"]},
         auth=AUTH,
     )
-    assert any(p.startswith(f"groups/{gid}") for p in fs.docs)
+    assert any(p.startswith(f"{firestore_sync.COLLECTION}/{gid}") for p in fs.docs)
     client.delete(f"/api/groups/{gid}", auth=AUTH)
-    assert not any(p.startswith(f"groups/{gid}") for p in fs.docs)
+    assert not any(p.startswith(f"{firestore_sync.COLLECTION}/{gid}") for p in fs.docs)
 
 
 def test_mirror_is_idempotent(client, fs):
@@ -227,10 +227,10 @@ def test_initial_sync_backfills_all_groups(client, fs):
     g2, ids2 = make_group(client, name="Trip B", members=("Bo",))
     fs.docs.clear()  # simulate a fresh/empty mirror before the initial sync
     firestore_sync.mirror_all_groups()
-    assert fs.docs[f"groups/{g1}"]["name"] == "Trip A"
-    assert fs.docs[f"groups/{g2}"]["name"] == "Trip B"
-    assert f"groups/{g1}/members/{ids1['Ada']}" in fs.docs
-    assert f"groups/{g2}/members/{ids2['Bo']}" in fs.docs
+    assert fs.docs[f"{firestore_sync.COLLECTION}/{g1}"]["name"] == "Trip A"
+    assert fs.docs[f"{firestore_sync.COLLECTION}/{g2}"]["name"] == "Trip B"
+    assert f"{firestore_sync.COLLECTION}/{g1}/members/{ids1['Ada']}" in fs.docs
+    assert f"{firestore_sync.COLLECTION}/{g2}/members/{ids2['Bo']}" in fs.docs
 
 
 def test_initial_sync_disabled_is_noop(monkeypatch):

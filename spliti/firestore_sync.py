@@ -18,9 +18,9 @@ Design notes:
     untouched.
 
 Firestore layout (collection / document):
-    groups/{gid}
+    spliti/{gid}                       # one document per group (group metadata)
       ├─ members/{member_id}
-      ├─ expenses/{expense_id}      # includes soft-delete flag + embedded shares
+      ├─ expenses/{expense_id}         # includes soft-delete flag + embedded shares
       └─ settlements/{settlement_id}
 """
 
@@ -30,7 +30,7 @@ from spliti import db
 from spliti.config import get_settings
 
 # Top-level collection holding one document per group.
-COLLECTION = "groups"
+COLLECTION = "spliti"
 
 # Firestore caps a single batched write at 500 operations; stay comfortably
 # under it and commit in chunks so a large group still mirrors in one pass.

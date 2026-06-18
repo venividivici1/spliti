@@ -108,7 +108,7 @@ Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, a `gcloud auth` login, or
 GCE/Cloud Run metadata). Firestore layout:
 
 ```
-groups/{gid}
+spliti/{gid}                  # one document per group (group metadata)
 ├─ members/{member_id}
 ├─ expenses/{expense_id}      # includes the soft-delete flag + embedded shares
 └─ settlements/{settlement_id}
