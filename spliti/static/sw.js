@@ -4,7 +4,7 @@
 //     (so the app opens offline; live data still needs the network).
 //   - static assets (icons/manifest): cache-first.
 //   - everything else (the /api/* JSON, AI streams): straight to network.
-const VERSION = 'spliti-v3';
+const VERSION = 'spliti-v6';
 const SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -73,4 +73,41 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Everything else (API/JSON/streams): network, no caching.
+});
+
+// ---- Web Push ----
+// Always show a banner so the event lands in the notification tray, and also nudge
+// any open window to refresh in place (the page reuses its normal flush()), so a
+// member looking at the app sees the change live as well as in the tray.
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (_) { /* keep defaults */ }
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of wins) c.postMessage({ type: 'sync' });
+    await self.registration.showNotification(d.title || 'Spliti', {
+      body: d.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: d.tag || 'spliti',
+      data: { url: d.url || '/' },
+    });
+  })());
+});
+
+// Tapping a notification focuses an already-open window (and nudges it to sync)
+// or opens the app.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of wins) {
+      if ('focus' in c) {
+        c.postMessage({ type: 'sync' });
+        return c.focus();
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(url);
+  })());
 });
