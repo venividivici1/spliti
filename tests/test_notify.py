@@ -240,3 +240,16 @@ def test_no_dispatch_when_group_has_no_subscribers(client, sent, monkeypatch):
         auth=AUTH,
     )
     assert calls == []
+
+
+def test_normalize_vapid_key_repairs_flattened_pem():
+    """A PEM whose newlines were lost in an env var is re-wrapped so it parses."""
+    body = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg" + "A" * 80
+    good = f"-----BEGIN PRIVATE KEY-----\n{body[:64]}\n{body[64:]}\n-----END PRIVATE KEY-----"
+    flat = f"-----BEGIN PRIVATE KEY-----{body}-----END PRIVATE KEY-----"
+    escaped = good.replace("\n", "\\n")
+    assert notifications.normalize_vapid_private_key(flat) == good
+    assert notifications.normalize_vapid_private_key(escaped) == good
+    # already-correct PEM and dash-less raw keys pass through unchanged
+    assert notifications.normalize_vapid_private_key(good) == good
+    assert notifications.normalize_vapid_private_key("rawbase64key") == "rawbase64key"
