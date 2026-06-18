@@ -1293,6 +1293,7 @@ function wireExpenseForm(d) {
     c.onclick = () => { userPickedCat = true; selectCat(c.dataset.cat); };
   });
   let catSuggestTimer = null;
+  const catCache = new Map();   // desc(lowercased) -> category; avoids repeat LLM lookups
   async function suggestCatFromBackend(desc) {
     // Only reached when local keyword matching gave up ("other"). Ask the server,
     // which falls back to the AI classifier constrained to our category list.
@@ -1300,21 +1301,27 @@ function wireExpenseForm(d) {
       const r = await fetch(`/api/suggest-category?description=${encodeURIComponent(desc)}`);
       if (!r.ok) return;
       const { category } = await r.json();
+      if (category) catCache.set(desc.trim().toLowerCase(), category);
       // Bail if the user has since picked a chip or changed the description.
       if (userPickedCat || $('#eDesc').value !== desc) return;
       if (category) selectCat(category);
     } catch (_) { /* best-effort — keep the local result */ }
   }
-  $('#eDesc').addEventListener('input', () => {
+  // Shared by typing and by AI autofill: keyword-match instantly, and only when
+  // that gives up do we debounce a single backend (LLM) call — reusing any cached
+  // answer for the same text so we never ask twice.
+  function detectCat(desc) {
     if (userPickedCat) return;
-    const desc = $('#eDesc').value;
     const detected = detectCategory(desc);
     selectCat(detected);
     clearTimeout(catSuggestTimer);
-    // Keyword match handled it — no need to bother the backend.
     if (detected !== 'other' || !desc.trim()) return;
+    const key = desc.trim().toLowerCase();
+    if (catCache.has(key)) { selectCat(catCache.get(key)); return; }
     catSuggestTimer = setTimeout(() => suggestCatFromBackend(desc), 600);
-  });
+  }
+  autoDetectCategory = detectCat;   // let fillDescSuggestion categorize its autofill
+  $('#eDesc').addEventListener('input', () => detectCat($('#eDesc').value));
   $('#addExpense').onclick = addExpense;
   $('#eAmt').addEventListener('input', () => { if (splitType === 'exact') renderSplitArea(); });
   $('#eDesc').focus();
@@ -1658,6 +1665,10 @@ function showLocChip() {
 function showLocLoading() { setLocChip('<span class="loc-spin"></span> Locating…', 'loading'); }
 const shortPlace = p => (p || '').split(',')[0].trim();
 
+// Set by the expense-form wiring; lets the AI description autofill below run its
+// text through the same keyword + LLM category detection a user keystroke would.
+let autoDetectCategory = null;
+
 async function fillDescSuggestion() {
   const desc = $('#eDesc');
   if (!desc || desc.value) return;
@@ -1674,6 +1685,7 @@ async function fillDescSuggestion() {
     desc.value = lastSet;
     desc.classList.add('suggested');
     desc.addEventListener('focus', () => desc.classList.remove('suggested'), { once: true });
+    if (autoDetectCategory) autoDetectCategory(lastSet);   // categorize the autofilled text
   };
 
   // 1) Fast: time-of-day suggestion, no location, no blocking.
