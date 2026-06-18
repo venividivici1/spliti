@@ -369,6 +369,10 @@ async def health_stream() -> StreamingResponse:
     Sampling is shared/cached server-side (see health.sample), so multiple open
     dashboards don't multiply the cost.
     """
+    if not health.available():
+        # psutil isn't installed — degrade just this feature, not the whole app.
+        raise HTTPException(status_code=503, detail="system metrics unavailable (psutil not installed)")
+
     async def events():
         while True:
             yield f"data: {json.dumps(health.sample())}\n\n"
