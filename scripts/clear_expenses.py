@@ -12,6 +12,11 @@ it, unless you pass --yes. Settlements are left alone unless --include-settlemen
 
 Targets spliti/split.db by default; override with --db or the usual DB_PATH the app
 uses. Back the file up first if you might want the data back.
+
+If the Cloud Firestore mirror is configured (FIRESTORE_PROJECT_ID), the affected
+groups are reconciled in Firestore afterwards so the cloud copy doesn't keep the
+hard-deleted rows. Pass --no-firestore to skip that. The reconcile no-ops when
+the mirror is disabled.
 """
 
 import argparse
@@ -66,7 +71,16 @@ def main() -> None:
     )
     ap.add_argument("--dry-run", action="store_true", help="show counts, change nothing")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    ap.add_argument(
+        "--no-firestore", action="store_true",
+        help="don't reconcile the Cloud Firestore mirror after clearing",
+    )
     args = ap.parse_args()
+
+    # Point the app's default DB at --db too, so the Firestore reconcile (which
+    # opens its own connection via db.connect()) reads the same file we cleared.
+    if args.db:
+        db.DB_PATH = Path(args.db)
 
     conn = db.connect(args.db)  # foreign_keys = ON, so shares cascade
     try:
@@ -118,8 +132,33 @@ def main() -> None:
         print(f"Deleted {n_exp} expense(s), {n_shares} share(s)"
               + (f", {n_settle} settlement(s)" if args.include_settlements else "")
               + ".")
+
+        if not args.no_firestore:
+            _reconcile_firestore(conn, gid)
     finally:
         conn.close()
+
+
+def _reconcile_firestore(conn, gid: int | None) -> None:
+    """Bring the Cloud Firestore mirror back in line after a direct SQLite edit.
+
+    The app mirrors on every API write, but this script edits the DB directly,
+    so nothing would otherwise update Firestore. The mirror is upsert-only and
+    can't express a hard delete, so for each affected group we drop its Firestore
+    document tree and rebuild it from the rows that remain — which prunes the
+    now-deleted expenses/settlements. No-op when the mirror isn't configured."""
+    from spliti import firestore_sync
+
+    if not firestore_sync.is_configured():
+        print("Firestore mirror not configured — skipped.")
+        return
+    gids = [gid] if gid is not None else [
+        r["id"] for r in conn.execute("SELECT id FROM groups ORDER BY id")
+    ]
+    for g in gids:
+        firestore_sync.delete_group(g)   # prune (removes the hard-deleted docs)
+        firestore_sync.mirror_group(g)   # rebuild from the current rows
+    print(f"Firestore mirror reconciled for {len(gids)} group(s).")
 
 
 if __name__ == "__main__":
