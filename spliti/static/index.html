@@ -288,6 +288,15 @@
   .notif-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
   .notif-cats.dim { opacity: 0.45; pointer-events: none; }
   .notif-lead { font-weight: 600; }
+  /* link to the standalone /health dashboard, shown below the notif rows */
+  .settings-link { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--panel2); color: var(--text);
+    text-decoration: none; font-size: 14px; }
+  .settings-link:hover { color: var(--accent); background: var(--hover-highlight); }
+  .settings-link .sl-label { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .settings-link svg { width: 18px; height: 18px; flex: none; }
+  .settings-link .sl-chev { opacity: 0.5; font-size: 18px; }
   button.danger:hover { background: #e0566f; color: #fff; }
   .modal.success { text-align: center; }
   .modal.success .modal-title { font-size: 19px; margin-bottom: 16px; }
@@ -313,6 +322,68 @@
     user-select: none; overflow: hidden; transition: transform 0.15s ease; }
   .av:hover { transform: scale(1.12) rotate(-6deg); }
   .splitrow .av { flex: 0 0 auto; }
+
+  /* ---- analytics dashboard ---- */
+  .analytics-grid { display: flex; flex-direction: column; gap: 16px; }
+  .analytics-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .analytics-stats .astat { background: var(--card); border-radius: 14px; padding: 14px;
+    text-align: center; border: 1px solid var(--line); }
+  .astat .astat-v { font-size: 1.3rem; font-weight: 700; color: var(--text); }
+  .astat .astat-l { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .astat .astat-icon { font-size: 1.4rem; margin-bottom: 4px; }
+
+  /* donut chart */
+  .donut-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .donut-svg { width: 160px; height: 160px; flex-shrink: 0; }
+  .donut-legend { display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
+  .donut-leg-item { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+  .donut-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .donut-leg-pct { color: var(--muted); margin-left: auto; }
+
+  /* horizontal bars */
+  .hbar-chart { display: flex; flex-direction: column; gap: 10px; }
+  .hbar-row { display: flex; align-items: center; gap: 10px; }
+  .hbar-label { min-width: 80px; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
+  .hbar-track { flex: 1; height: 24px; background: var(--hover-highlight); border-radius: 6px; overflow: hidden; position: relative; }
+  .hbar-fill { height: 100%; border-radius: 6px; transition: width 0.6s ease; display: flex; align-items: center; padding: 0 8px; }
+  .hbar-val { font-size: 0.75rem; font-weight: 600; color: var(--bg); white-space: nowrap; }
+
+  /* line chart */
+  .line-chart-wrap { position: relative; overflow-x: auto; }
+  .line-chart-svg { width: 100%; min-width: 300px; height: 180px; }
+  .line-chart-svg text { fill: var(--muted); font-size: 11px; }
+  .line-chart-svg .grid-line { stroke: var(--line); stroke-dasharray: 4 4; }
+  .line-chart-svg .area-fill { opacity: 0.15; }
+  .line-chart-svg .line-path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  .line-chart-svg .dot { r: 4; stroke-width: 2; }
+
+  /* flow diagram */
+  .flow-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .flow-row { display: flex; align-items: center; gap: 8px; }
+  .flow-from, .flow-to { min-width: 70px; font-size: 0.85rem; display: flex; align-items: center; gap: 4px; }
+  .flow-to { justify-content: flex-end; }
+  .flow-arrow { flex: 1; position: relative; height: 28px; }
+  .flow-arrow-bar { position: absolute; top: 50%; left: 0; height: 4px; border-radius: 2px; transform: translateY(-50%);
+    transition: width 0.5s ease; }
+  .flow-arrow-amt { position: absolute; top: 0; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 600; }
+
+  /* top expenses */
+  .top-list { display: flex; flex-direction: column; gap: 8px; }
+  .top-item { display: flex; align-items: center; gap: 10px; }
+  .top-rank { font-size: 1.1rem; min-width: 28px; text-align: center; }
+  .top-info { flex: 1; }
+  .top-desc { font-size: 0.9rem; font-weight: 500; }
+  .top-meta { font-size: 0.75rem; color: var(--muted); }
+  .top-amt { font-weight: 700; }
+
+  /* fairness chart */
+  .fair-chart { display: flex; flex-direction: column; gap: 10px; }
+  .fair-row { display: flex; align-items: center; gap: 10px; }
+  .fair-label { min-width: 80px; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
+  .fair-track { flex: 1; height: 20px; position: relative; display: flex; align-items: center; }
+  .fair-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); }
+  .fair-bar { position: absolute; height: 14px; border-radius: 4px; top: 3px; transition: width 0.5s ease, left 0.5s ease; }
+  .fair-val { font-size: 0.75rem; color: var(--muted); min-width: 60px; text-align: right; }
 
   /* ---- bottom navigation ---- */
   .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex;
@@ -390,11 +461,6 @@
   .cat-chip.on { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
   .cat-chip .cat-emoji { font-size: 15px; }
 
-  /* ---- category breakdown ---- */
-  .cat-breakdown { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .cat-stat { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; }
-  .cat-stat .cat-emoji { font-size: 15px; }
-  .cat-stat .cat-pct { color: var(--muted); font-size: 12px; }
   .exp-right { display: flex; align-items: center; gap: 10px; flex: none; }
 
   /* ---- balance rows with bars ---- */
@@ -513,6 +579,7 @@ const ICON_PATHS = {
   // sync-status icons
   cloudcheck: '<path d="M7 18h10a3.5 3.5 0 0 0 .5-6.97A5 5 0 0 0 8.6 9.2 4 4 0 0 0 7 18Z"/><path d="m9.5 13.5 1.8 1.8 3.2-3.2"/>',
   cloudoff: '<path d="M3 3l18 18"/><path d="M8.6 9.2A5 5 0 0 1 16.9 11.1 3.5 3.5 0 0 1 18.8 17M15.5 18H7a4 4 0 0 1-1.3-7.8"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M7 16l4-4 3 3 5-6"/>',
 };
 function icon(name, size=24) {
   return `<svg class="ic-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" `
@@ -1071,6 +1138,7 @@ function toast(msg) {
 const TABS = [
   ['overview','Overview','home'],
   ['history','History','history'],
+  ['analytics','Analytics','chart'],
   ['balance','Balance','balance'],
 ];
 let activeTab = localStorage.getItem('split.tab') || 'overview';
@@ -1098,6 +1166,7 @@ function renderTab() {
   body.innerHTML = ({
     overview: overviewSection,
     history: () => historySection(d),
+    analytics: () => analyticsSection(d),
     balance: () => balanceSection(d),
   }[activeTab] || overviewSection)();
   wireTab();
@@ -1111,28 +1180,11 @@ function overviewSection() {
   const spentToday = active.filter(e => istDateKey(e.created_at) === todayKey)
     .reduce((s, e) => s + e.amount_paise, 0);
 
-  // Category breakdown
-  const byCat = {};
-  active.forEach(e => {
-    const cat = e.category || 'other';
-    byCat[cat] = (byCat[cat] || 0) + e.amount_paise;
-  });
-  const catBreakdown = Object.entries(byCat)
-    .sort((a, b) => b[1] - a[1])
-    .map(([cat, amt]) => {
-      const pct = total > 0 ? Math.round(amt / total * 100) : 0;
-      return `<div class="cat-stat"><span class="cat-emoji">${catEmoji(cat)}</span>${fmt(amt)} <span class="cat-pct">(${pct}%)</span></div>`;
-    }).join('');
-
   return `
     <div class="card stats">
       <div class="stat"><div class="stat-v" data-count="${total}">${fmt(0)}</div><div class="stat-l">Total spent</div></div>
       <div class="stat"><div class="stat-v" data-count="${spentToday}">${fmt(0)}</div><div class="stat-l">Spent today</div></div>
     </div>
-    ${active.length ? `<div class="card">
-      <h2>Spending by category</h2>
-      <div class="cat-breakdown">${catBreakdown}</div>
-    </div>` : ''}
     <div class="card">
       <h2>The crew</h2>
       <div class="crew">${d.members.map(m=>`
@@ -1240,15 +1292,258 @@ function wireExpenseForm(d) {
     const orig = c.onclick;
     c.onclick = () => { userPickedCat = true; selectCat(c.dataset.cat); };
   });
-  $('#eDesc').addEventListener('input', () => {
+  let catSuggestTimer = null;
+  const catCache = new Map();   // desc(lowercased) -> category; avoids repeat LLM lookups
+  async function suggestCatFromBackend(desc) {
+    // Only reached when local keyword matching gave up ("other"). Ask the server,
+    // which falls back to the AI classifier constrained to our category list.
+    try {
+      const r = await fetch(`/api/suggest-category?description=${encodeURIComponent(desc)}`);
+      if (!r.ok) return;
+      const { category } = await r.json();
+      if (category) catCache.set(desc.trim().toLowerCase(), category);
+      // Bail if the user has since picked a chip or changed the description.
+      if (userPickedCat || $('#eDesc').value !== desc) return;
+      if (category) selectCat(category);
+    } catch (_) { /* best-effort — keep the local result */ }
+  }
+  // Shared by typing and by AI autofill: keyword-match instantly, and only when
+  // that gives up do we debounce a single backend (LLM) call — reusing any cached
+  // answer for the same text so we never ask twice.
+  function detectCat(desc) {
     if (userPickedCat) return;
-    const detected = detectCategory($('#eDesc').value);
+    const detected = detectCategory(desc);
     selectCat(detected);
-  });
+    clearTimeout(catSuggestTimer);
+    if (detected !== 'other' || !desc.trim()) return;
+    const key = desc.trim().toLowerCase();
+    if (catCache.has(key)) { selectCat(catCache.get(key)); return; }
+    catSuggestTimer = setTimeout(() => suggestCatFromBackend(desc), 600);
+  }
+  autoDetectCategory = detectCat;   // let fillDescSuggestion categorize its autofill
+  $('#eDesc').addEventListener('input', () => detectCat($('#eDesc').value));
   $('#addExpense').onclick = addExpense;
   $('#eAmt').addEventListener('input', () => { if (splitType === 'exact') renderSplitArea(); });
   $('#eDesc').focus();
   fillDescSuggestion();
+}
+
+// ---- Analytics Dashboard ----
+const CHART_COLORS = ['#7aa2f7','#f7768e','#9ece6a','#e0af68','#2ac3de','#bb9af7','#ff9e64','#73daca','#c0caf5','#db4b4b','#449dab'];
+
+function analyticsSection(d) {
+  const active = d.expenses.filter(e => !e.deleted);
+  const total = active.reduce((s, e) => s + e.amount_paise, 0);
+  const members = d.members;
+  const perPerson = members.length ? Math.round(total / members.length) : 0;
+
+  // Trip duration
+  const dates = active.map(e => new Date((e.created_at||'').replace(' ','T')+'Z')).filter(d => !isNaN(d));
+  const firstDate = dates.length ? new Date(Math.min(...dates)) : null;
+  const lastDate = dates.length ? new Date(Math.max(...dates)) : null;
+  const tripDays = firstDate && lastDate ? Math.max(1, Math.round((lastDate - firstDate) / 86400000) + 1) : 0;
+
+  // Most used category
+  const byCat = {};
+  active.forEach(e => { const c = e.category || 'other'; byCat[c] = (byCat[c]||0) + 1; });
+  const topCat = Object.entries(byCat).sort((a,b) => b[1]-a[1])[0];
+  const topCatLabel = topCat ? `${catEmoji(topCat[0])} ${(CATEGORIES[topCat[0]]||CATEGORIES.other).label}` : '—';
+
+  return `<div class="analytics-grid">
+    ${summaryCards(total, perPerson, tripDays, topCatLabel)}
+    ${donutChart(active, total)}
+    ${memberBars(active, members)}
+    ${dailyTrend(active)}
+    ${flowDiagram(d.suggestions)}
+    ${topExpenses(active)}
+    ${fairnessChart(active, members, perPerson)}
+  </div>`;
+}
+
+function summaryCards(total, perPerson, tripDays, topCat) {
+  return `<div class="analytics-stats">
+    <div class="astat"><div class="astat-icon">💰</div><div class="astat-v">${fmt(total)}</div><div class="astat-l">Total Trip Cost</div></div>
+    <div class="astat"><div class="astat-icon">👥</div><div class="astat-v">${fmt(perPerson)}</div><div class="astat-l">Per Person Avg</div></div>
+    <div class="astat"><div class="astat-icon">📅</div><div class="astat-v">${tripDays} day${tripDays!==1?'s':''}</div><div class="astat-l">Trip Duration</div></div>
+    <div class="astat"><div class="astat-icon">🏷️</div><div class="astat-v" style="font-size:1rem">${topCat}</div><div class="astat-l">Top Category</div></div>
+  </div>`;
+}
+
+function donutChart(active, total) {
+  if (!active.length) return '';
+  const byCat = {};
+  active.forEach(e => { const c = e.category || 'other'; byCat[c] = (byCat[c]||0) + e.amount_paise; });
+  const sorted = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+
+  const cx = 80, cy = 80, r = 64, ir = 38;
+  let cumAngle = -Math.PI/2;
+  const arcs = sorted.map(([cat, amt], i) => {
+    const frac = total > 0 ? amt / total : 0;
+    const angle = frac * 2 * Math.PI;
+    const startAngle = cumAngle;
+    cumAngle += angle;
+    const endAngle = cumAngle;
+    const largeArc = angle > Math.PI ? 1 : 0;
+    const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+    const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
+    const ix1 = cx + ir * Math.cos(endAngle), iy1 = cy + ir * Math.sin(endAngle);
+    const ix2 = cx + ir * Math.cos(startAngle), iy2 = cy + ir * Math.sin(startAngle);
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    const path = sorted.length === 1
+      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/><circle cx="${cx}" cy="${cy}" r="${ir}" fill="var(--card)"/>`
+      : `<path d="M${x1},${y1} A${r},${r} 0 ${largeArc},1 ${x2},${y2} L${ix1},${iy1} A${ir},${ir} 0 ${largeArc},0 ${ix2},${iy2} Z" fill="${color}"/>`;
+    return { path, color, cat, amt, pct: Math.round(frac * 100) };
+  });
+
+  const legend = arcs.map(a =>
+    `<div class="donut-leg-item"><span class="donut-swatch" style="background:${a.color}"></span>${catEmoji(a.cat)} ${(CATEGORIES[a.cat]||CATEGORIES.other).label}<span class="donut-leg-pct">${a.pct}%</span></div>`
+  ).join('');
+
+  return `<div class="card">
+    <h2>Spending by Category</h2>
+    <div class="donut-wrap">
+      <svg class="donut-svg" viewBox="0 0 160 160">${arcs.map(a=>a.path).join('')}</svg>
+      <div class="donut-legend">${legend}</div>
+    </div>
+  </div>`;
+}
+
+function memberBars(active, members) {
+  if (!active.length) return '';
+  const byMember = {};
+  members.forEach(m => { byMember[m.name] = 0; });
+  active.forEach(e => { byMember[e.paid_by_name] = (byMember[e.paid_by_name]||0) + e.amount_paise; });
+  const sorted = Object.entries(byMember).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(1, sorted[0][1]);
+
+  const bars = sorted.map(([name, amt], i) => {
+    const pct = Math.round(amt / max * 100);
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    return `<div class="hbar-row">
+      <div class="hbar-label">${avatar(name,22)}<span>${esc(name)}</span></div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${color}"><span class="hbar-val">${fmt(amt)}</span></div></div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card"><h2>Who's Spending Most</h2><div class="hbar-chart">${bars}</div></div>`;
+}
+
+function dailyTrend(active) {
+  if (active.length < 2) return '';
+  const byDay = {};
+  active.forEach(e => {
+    const k = istDateKey(e.created_at);
+    if (k) byDay[k] = (byDay[k]||0) + e.amount_paise;
+  });
+  const days = Object.keys(byDay).sort();
+  if (days.length < 2) return '';
+  const vals = days.map(k => byDay[k]);
+  const maxVal = Math.max(...vals);
+
+  const pad = { l: 50, r: 15, t: 15, b: 30 };
+  const w = Math.max(300, days.length * 60);
+  const h = 180;
+  const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+  const pts = days.map((k, i) => ({
+    x: pad.l + (i / (days.length - 1)) * cw,
+    y: pad.t + ch - (vals[i] / maxVal) * ch,
+    label: labelFromKey(k),
+    val: vals[i]
+  }));
+
+  const linePath = pts.map((p, i) => `${i?'L':'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+  const areaPath = linePath + `L${pts[pts.length-1].x.toFixed(1)},${pad.t+ch}L${pts[0].x.toFixed(1)},${pad.t+ch}Z`;
+
+  // Grid lines
+  const gridCount = 4;
+  const gridLines = Array.from({length: gridCount+1}, (_, i) => {
+    const y = pad.t + (i / gridCount) * ch;
+    const v = maxVal - (i / gridCount) * maxVal;
+    return `<line class="grid-line" x1="${pad.l}" y1="${y}" x2="${w-pad.r}" y2="${y}"/>
+      <text x="${pad.l-6}" y="${y+4}" text-anchor="end">${fmt(v)}</text>`;
+  }).join('');
+
+  const dots = pts.map(p =>
+    `<circle class="dot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" fill="var(--accent)" stroke="var(--card)"/>`
+  ).join('');
+  const labels = pts.map(p =>
+    `<text x="${p.x.toFixed(1)}" y="${h - 6}" text-anchor="middle">${p.label}</text>`
+  ).join('');
+
+  return `<div class="card"><h2>Daily Spending Trend</h2>
+    <div class="line-chart-wrap">
+      <svg class="line-chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMinYMin meet">
+        ${gridLines}
+        <path class="area-fill" d="${areaPath}" fill="var(--accent)"/>
+        <path class="line-path" d="${linePath}" stroke="var(--accent)"/>
+        ${dots}${labels}
+      </svg>
+    </div>
+  </div>`;
+}
+
+function flowDiagram(suggestions) {
+  if (!suggestions || !suggestions.length) return `<div class="card"><h2>Settlement Flow</h2><div class="muted">All settled up ✦</div></div>`;
+  const maxAmt = Math.max(1, ...suggestions.map(s => s.amount_paise));
+  const flows = suggestions.map((s, i) => {
+    const pct = Math.round(s.amount_paise / maxAmt * 100);
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    return `<div class="flow-row">
+      <div class="flow-from">${avatar(s.from_name,22)}<span>${esc(s.from_name)}</span></div>
+      <div class="flow-arrow">
+        <div class="flow-arrow-amt" style="color:${color}">${fmt(s.amount_paise)}</div>
+        <div class="flow-arrow-bar" style="width:${pct}%;background:${color}"></div>
+      </div>
+      <div class="flow-to"><span>${esc(s.to_name)}</span>${avatar(s.to_name,22)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card"><h2>Settlement Flow</h2><p class="hint-line">Who pays whom to settle up</p><div class="flow-wrap">${flows}</div></div>`;
+}
+
+function topExpenses(active) {
+  if (!active.length) return '';
+  const top5 = [...active].sort((a,b) => b.amount_paise - a.amount_paise).slice(0, 5);
+  const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];
+  const items = top5.map((e, i) =>
+    `<div class="top-item">
+      <span class="top-rank">${medals[i]}</span>
+      <div class="top-info"><div class="top-desc">${catEmoji(e.category)} ${esc(e.description)}</div>
+        <div class="top-meta">Paid by ${esc(e.paid_by_name)} · ${fmtDate(e.created_at)}</div></div>
+      <span class="top-amt">${fmt(e.amount_paise)}</span>
+    </div>`
+  ).join('');
+  return `<div class="card"><h2>Top Expenses</h2><div class="top-list">${items}</div></div>`;
+}
+
+function fairnessChart(active, members, perPerson) {
+  if (!members.length || !active.length) return '';
+  // Calculate how much each person actually paid vs fair share
+  const paid = {};
+  members.forEach(m => { paid[m.name] = 0; });
+  active.forEach(e => { paid[e.paid_by_name] = (paid[e.paid_by_name]||0) + e.amount_paise; });
+  const entries = members.map(m => ({ name: m.name, diff: paid[m.name] - perPerson }));
+  const maxDev = Math.max(1, ...entries.map(e => Math.abs(e.diff)));
+
+  const bars = entries.map(e => {
+    const pct = Math.abs(e.diff) / maxDev * 45;
+    const isOver = e.diff > 0;
+    const left = isOver ? 50 : 50 - pct;
+    const color = isOver ? '#9ece6a' : '#f7768e';
+    const label = isOver ? `+${fmt(e.diff)}` : fmt(e.diff);
+    return `<div class="fair-row">
+      <div class="fair-label">${avatar(e.name,22)}<span>${esc(e.name)}</span></div>
+      <div class="fair-track"><div class="fair-mid"></div>
+        <div class="fair-bar" style="left:${left}%;width:${pct}%;background:${color}"></div>
+      </div>
+      <span class="fair-val">${label}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="card"><h2>Split Fairness</h2>
+    <p class="hint-line">Deviation from equal share (${fmt(perPerson)}/person)</p>
+    <div class="fair-chart">${bars}</div>
+  </div>`;
 }
 
 function balanceSection(d) {
@@ -1370,6 +1665,10 @@ function showLocChip() {
 function showLocLoading() { setLocChip('<span class="loc-spin"></span> Locating…', 'loading'); }
 const shortPlace = p => (p || '').split(',')[0].trim();
 
+// Set by the expense-form wiring; lets the AI description autofill below run its
+// text through the same keyword + LLM category detection a user keystroke would.
+let autoDetectCategory = null;
+
 async function fillDescSuggestion() {
   const desc = $('#eDesc');
   if (!desc || desc.value) return;
@@ -1386,6 +1685,7 @@ async function fillDescSuggestion() {
     desc.value = lastSet;
     desc.classList.add('suggested');
     desc.addEventListener('focus', () => desc.classList.remove('suggested'), { once: true });
+    if (autoDetectCategory) autoDetectCategory(lastSet);   // categorize the autofilled text
   };
 
   // 1) Fast: time-of-day suggestion, no location, no blocking.
@@ -1898,6 +2198,15 @@ function settingsModal() {
   ov.innerHTML = `<div class="modal">
     <div class="modal-title">Notifications</div>
     <div id="setBody" class="modal-msg" style="margin-bottom:14px">Loading…</div>
+    <a class="settings-link" href="/health">
+      <span class="sl-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        System health
+      </span>
+      <span class="sl-chev" aria-hidden="true">›</span>
+    </a>
     <div class="modal-actions"><button data-act="ok">Done</button></div>
   </div>`;
   document.body.appendChild(ov);

@@ -151,6 +151,53 @@ async def suggest_description(
     return desc[:80]
 
 
+# Cache classifier outcomes by lowercased description so identical descriptions
+# never cost a second model call. Stores "" for a miss (so we don't re-ask for
+# text the model couldn't place). Bounded to keep memory flat.
+_CAT_CACHE: dict[str, str] = {}
+_CAT_CACHE_MAX = 1024
+
+
+async def suggest_category(description: str, catalog: list[dict]) -> str | None:
+    """Map a free-text expense description to ONE id from the exhaustive `catalog`.
+
+    `catalog` is a list of {"id", "label"} dicts (the closed category set). Returns
+    a valid id from it, or None when the description is empty, the model is unsure,
+    or its reply doesn't match a known id. Callers should fall back to keyword
+    matching / "other" on None. Results (hits and misses) are cached by description.
+    """
+    desc = (description or "").strip()
+    if not desc or not catalog:
+        return None
+    key = desc.lower()
+    if key in _CAT_CACHE:
+        return _CAT_CACHE[key] or None
+    options = "\n".join(f"  {c['id']}: {c['label']}" for c in catalog)
+    prompt = (
+        "Classify a friends' road-trip expense into exactly ONE category. Below is the "
+        "COMPLETE, exhaustive list of allowed categories as `id: label`:\n"
+        f"{options}\n\n"
+        f'Expense description: "{desc}"\n\n'
+        "Reply with ONLY the matching category id (the token before the colon) and nothing "
+        "else — no label, quotes, punctuation, or explanation. If none fits, reply: other"
+    )
+    resp = await client().chat.complete_async(
+        model=MODEL, max_tokens=8, messages=[{"role": "user", "content": prompt}]
+    )
+    content = resp.choices[0].message.content if resp.choices else ""
+    if isinstance(content, list):
+        content = "".join(getattr(c, "text", "") for c in content)
+    # First token, lowercased; tolerate a whitespace-only reply (empty split) and
+    # a stray trailing colon if the model echoes "id: label" despite the prompt.
+    parts = (content or "").strip().strip('."\'').lower().split()
+    cat = parts[0].rstrip(":") if parts else ""
+    valid = {c["id"] for c in catalog}
+    result = cat if cat in valid else None
+    if len(_CAT_CACHE) < _CAT_CACHE_MAX:
+        _CAT_CACHE[key] = result or ""
+    return result
+
+
 async def answer_stream(context: str, history: list[dict], question: str):
     """Yield answer text chunks for a question about the group."""
     messages = [{"role": "system", "content": f"{SYSTEM}\n\n--- GROUP DATA ---\n{context}"}]

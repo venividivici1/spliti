@@ -4,8 +4,10 @@ Runs standalone (uvicorn spliti.app:split_app); was previously host-mounted in t
 Money crosses the API as decimal amounts but is stored/computed as integer paise.
 """
 
+import asyncio
 import csv
 import io
+import json
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
@@ -17,12 +19,15 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from spliti.config import get_settings
-from spliti import ask, balances, db, firestore_sync, notifications
+from spliti import ask, balances, db, firestore_sync, health, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 # The single group the UI locks onto for now (members/groups are managed out of band).
 DEFAULT_GROUP = "Spiti"
+
+# How often the /health stream pushes a metrics snapshot (seconds).
+HEALTH_STREAM_INTERVAL = 2.0
 
 # ---- expense categories ----
 CATEGORIES = {
@@ -349,6 +354,33 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@split_app.get("/health", include_in_schema=False)
+def health_page() -> FileResponse:
+    # Dashboard shell, served without auth like the main app shell. It carries no
+    # data — the live metrics come from /health/stream, which stays behind the
+    # same Basic auth (the page reuses the spliti credential, so no extra login).
+    return FileResponse(STATIC_DIR / "health.html")
+
+
+@split_app.get("/health/stream", dependencies=[Depends(require_auth)])
+async def health_stream() -> StreamingResponse:
+    """Server-Sent Events stream of system metrics, pushed every few seconds.
+
+    Sampling is shared/cached server-side (see health.sample), so multiple open
+    dashboards don't multiply the cost.
+    """
+    async def events():
+        while True:
+            yield f"data: {json.dumps(health.sample())}\n\n"
+            await asyncio.sleep(HEALTH_STREAM_INTERVAL)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @split_app.get("/")
 def index() -> FileResponse:
     # The shell is served without auth so it can open instantly (and, on iOS
@@ -496,8 +528,28 @@ def get_categories() -> dict:
 
 @split_app.get("/api/detect-category")
 def api_detect_category(description: str = "") -> dict:
-    """Auto-detect a category from an expense description."""
+    """Auto-detect a category from an expense description (keyword matching only)."""
     return {"category": detect_category(description)}
+
+
+@split_app.get("/api/suggest-category")
+async def api_suggest_category(description: str = "") -> dict:
+    """Suggest a category for a description.
+
+    Keyword matching runs first; only when it can't place the description (lands on
+    "other") do we fall back to the AI classifier, constrained to the exhaustive
+    category set. Best-effort — returns the keyword result if AI is unavailable.
+    """
+    cat = detect_category(description)
+    if cat == "other" and description.strip() and get_settings().mistral_api_key:
+        catalog = [{"id": k, "label": v["label"]} for k, v in CATEGORIES.items() if k != "other"]
+        try:
+            suggested = await ask.suggest_category(description, catalog)
+            if suggested:
+                cat = suggested
+        except Exception:
+            pass
+    return {"category": cat}
 
 
 @split_app.get("/api/suggest-description", dependencies=[Depends(require_auth)])

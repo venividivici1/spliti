@@ -31,6 +31,11 @@ integer **paise** throughout, so balances always reconcile exactly.
   Firestore in the background as a self-healing full-group snapshot (handy for
   backup or a second consumer). Disabled by default — the app runs on SQLite
   alone. See [Cloud Firestore mirror](#cloud-firestore-mirror-optional).
+- **System health dashboard** — `/health` serves a live dashboard (CPU incl.
+  per-core, memory, swap, disk usage + IO, network throughput, load, uptime)
+  streamed over Server-Sent Events. Sampling is shared/cached server-side so
+  many open dashboards cost about the same as one. The page is reachable from
+  the in-app settings; the metrics stream sits behind the same Basic auth.
 
 The UI locks onto a single group (`DEFAULT_GROUP = "Spiti"`); group/member
 management happens out of band against the API.
@@ -135,9 +140,11 @@ spliti/
 ├── balances.py   # net-balance + settle-up math (pure, integer paise)
 ├── db.py         # SQLite schema, connection, idempotent migrations
 ├── firestore_sync.py # optional Cloud Firestore mirror (SQLite is source of truth)
+├── health.py     # lightweight psutil system-metrics sampling for /health
 ├── split.db      # local SQLite data (git-ignored)
 └── static/
     ├── index.html          # the entire single-file web UI
+    ├── health.html         # standalone /health system dashboard (SSE)
     ├── manifest.webmanifest # PWA manifest (installable app metadata)
     ├── sw.js               # service worker (standalone/offline shell)
     └── icons/              # app icons (Android maskable + iOS apple-touch)
