@@ -16,8 +16,12 @@ uses. Back the file up first if you might want the data back.
 
 import argparse
 import sys
+from pathlib import Path
 
-from spliti import db
+# Prefer the repo's spliti package over any (possibly stale) pip-installed copy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from spliti import db  # noqa: E402
 
 
 def _resolve_group(conn, group: str | None) -> int | None:

@@ -15,9 +15,14 @@ pushes a real "Spliti test" notification to every subscription and prints status
 import argparse
 import json
 import sys
+from pathlib import Path
 
-from spliti import db, notifications
-from spliti.config import get_settings
+# Prefer the repo's spliti package over any (possibly stale) pip-installed copy,
+# so the script always runs the same code that's checked out here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from spliti import db, notifications  # noqa: E402
+from spliti.config import get_settings  # noqa: E402
 
 
 def main() -> None:
