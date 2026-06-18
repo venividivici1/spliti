@@ -21,9 +21,24 @@
     --bg: #0f1419; --panel: #1a212b; --panel2: #222c39; --line: #2c3845;
     --text: #e6edf3; --muted: #8b98a8; --accent: #2dd4a7; --accent2: #1f9d7c;
     --red: #f7768e; --green: #2dd4a7; --chip: #2a3543;
+    --btn-text: #06281f; --overlay: rgba(0,0,0,0.55);
+    --header-bg: rgba(15,20,25,0.96); --header-bg2: rgba(15,20,25,0.82);
+    --nav-bg: rgba(26,33,43,0.92);
+    --hover-highlight: rgba(255,255,255,0.04); --code-bg: rgba(0,0,0,0.28);
+    --skel-mid: #2f3b4a; --pre-bg: #0f1419;
     --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     --font-display: 'Fredoka', 'Plus Jakarta Sans', system-ui, sans-serif;
     --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  [data-theme="light"] {
+    --bg: #f0f2f5; --panel: #ffffff; --panel2: #e8ecf1; --line: #d1d9e0;
+    --text: #1a1a2e; --muted: #5a6370; --accent: #0d9373; --accent2: #0b7a60;
+    --red: #dc3545; --green: #0d9373; --chip: #dce3eb;
+    --btn-text: #ffffff; --overlay: rgba(0,0,0,0.35);
+    --header-bg: rgba(255,255,255,0.96); --header-bg2: rgba(255,255,255,0.82);
+    --nav-bg: rgba(255,255,255,0.92);
+    --hover-highlight: rgba(0,0,0,0.04); --code-bg: rgba(0,0,0,0.08);
+    --skel-mid: #cfd8e0; --pre-bg: #e8ecf1;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -39,9 +54,17 @@
   /* tabular money so columns line up */
   .amt, .stat-v, .exact, .split-sum { font-variant-numeric: tabular-nums; }
 
+  /* ---- theme toggle ---- */
+  .theme-toggle { margin-left: auto; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 50%; width: 36px; height: 36px; min-height: 0; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--muted); transition: color 0.2s ease, background 0.2s ease; flex: none; }
+  .theme-toggle:hover { color: var(--accent); background: var(--hover-highlight); }
+  .theme-toggle svg { width: 18px; height: 18px; }
+
   /* ---- header (mobile-first, sticky) ---- */
   header { position: sticky; top: 0; z-index: 10;
-    background: linear-gradient(180deg, rgba(15,20,25,0.96), rgba(15,20,25,0.82));
+    background: linear-gradient(180deg, var(--header-bg), var(--header-bg2));
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     padding: calc(13px + env(safe-area-inset-top, 0px)) 16px 13px;
     border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 11px; }
@@ -70,7 +93,7 @@
   input:focus, select:focus { outline: none; border-color: var(--accent); }
   input.suggested { color: var(--muted); font-style: italic; }
   label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px; }
-  button { background: var(--accent); color: #06281f; border: none; border-radius: 10px;
+  button { background: var(--accent); color: var(--btn-text); border: none; border-radius: 10px;
     padding: 12px 16px; font-weight: 600; cursor: pointer; min-height: 46px; }
   button:active { transform: scale(0.98); }
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
@@ -85,7 +108,7 @@
   .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .seg button { flex: 1; background: var(--panel2); color: var(--muted); border-radius: 0;
     font-weight: 500; min-height: 44px; }
-  .seg button.on { background: var(--accent); color: #06281f; }
+  .seg button.on { background: var(--accent); color: var(--btn-text); }
   #addExpense { width: 100%; margin-top: 4px; }
 
   /* groups: horizontal scroll pills on mobile, vertical list on desktop */
@@ -94,8 +117,8 @@
   .glist li { flex: 0 0 auto; white-space: nowrap; padding: 10px 14px; border-radius: 999px;
     cursor: pointer; background: var(--panel2); border: 1px solid var(--line);
     display: flex; gap: 8px; align-items: center; }
-  .glist li.active { background: var(--accent); color: #06281f; border-color: var(--accent); }
-  .glist li.active .count { color: #06281f; }
+  .glist li.active { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
+  .glist li.active .count { color: var(--btn-text); }
   .glist .count { color: var(--muted); font-size: 12px; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -116,7 +139,7 @@
   .exp.deleted { opacity: 0.55; }
   .exp.deleted .exp-desc, .exp.deleted .amt { text-decoration: line-through; }
   .exp.clickable { cursor: pointer; }
-  .exp.clickable:hover { background: rgba(255,255,255,0.03); border-radius: 8px; }
+  .exp.clickable:hover { background: var(--hover-highlight); border-radius: 8px; }
   /* paid-by vs added-by, shown in the expense detail (by the split chart) */
   .who-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
   .who-pill { display: flex; align-items: center; gap: 7px; flex: 1 1 0; min-width: 0;
@@ -144,7 +167,7 @@
     overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .msg { padding: 10px 13px; border-radius: 14px; max-width: 88%; white-space: pre-wrap;
     word-wrap: break-word; line-height: 1.45; font-size: 15px; }
-  .msg.user { align-self: flex-end; background: var(--accent); color: #06281f;
+  .msg.user { align-self: flex-end; background: var(--accent); color: var(--btn-text);
     border-bottom-right-radius: 4px; }
   .msg.bot { align-self: flex-start; background: var(--panel2); border: 1px solid var(--line);
     border-bottom-left-radius: 4px; white-space: normal; }
@@ -152,9 +175,9 @@
   .msg.bot ul, .msg.bot ol { margin: 4px 0 8px; padding-left: 20px; }
   .msg.bot li { margin: 2px 0; }
   .msg.bot .md-h { display: block; font-weight: 700; margin: 6px 0 4px; }
-  .msg.bot code { background: rgba(0,0,0,.28); padding: 1px 5px; border-radius: 5px;
+  .msg.bot code { background: var(--code-bg); padding: 1px 5px; border-radius: 5px;
     font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .msg.bot pre { background: #0f1419; border: 1px solid var(--line); border-radius: 8px;
+  .msg.bot pre { background: var(--pre-bg); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px; overflow-x: auto; margin: 6px 0; }
   .msg.bot pre code { background: none; padding: 0; }
   .msg.hint { align-self: center; background: none; color: var(--muted); font-size: 13px;
@@ -198,7 +221,7 @@
   .crew-m { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
     gap: 6px; width: 68px; padding: 6px 2px; background: none; border: none; cursor: pointer;
     border-radius: 12px; min-height: 0; transition: background 0.15s ease, transform 0.1s ease; }
-  .crew-m:hover { background: rgba(255,255,255,0.04); }
+  .crew-m:hover { background: var(--hover-highlight); }
   .crew-m:active { transform: scale(0.95); }
   .crew-m .name { font-size: 12px; color: var(--muted); font-weight: 600; max-width: 100%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -216,7 +239,7 @@
   .exp { transition: opacity 0.2s ease; }
 
   /* ---- confirm modal ---- */
-  .modal-ov { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex;
+  .modal-ov { position: fixed; inset: 0; background: var(--overlay); display: flex;
     align-items: center; justify-content: center; padding: 20px; z-index: 100;
     opacity: 0; transition: opacity 0.18s ease; }
   .modal-ov.show { opacity: 1; }
@@ -228,7 +251,7 @@
   .modal-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .modal-msg { color: var(--muted); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-  button.danger { background: var(--red); color: #3a0d16; }
+  button.danger { background: var(--red); color: var(--btn-text); }
   button.danger:hover { background: #e0566f; color: #fff; }
   .modal.success { text-align: center; }
   .modal.success .modal-title { font-size: 19px; margin-bottom: 16px; }
@@ -243,7 +266,7 @@
 
   /* ---- toast ---- */
   .toast { position: fixed; left: 50%; bottom: calc(22px + var(--safe-b));
-    transform: translateX(-50%) translateY(20px); background: var(--accent); color: #06281f;
+    transform: translateX(-50%) translateY(20px); background: var(--accent); color: var(--btn-text);
     padding: 11px 20px; border-radius: 999px; font-weight: 600; z-index: 120; opacity: 0;
     transition: opacity 0.25s ease, transform 0.25s ease; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
   .toast.show { opacity: 1; transform: translateX(-50%); }
@@ -257,7 +280,7 @@
 
   /* ---- bottom navigation ---- */
   .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex;
-    background: rgba(26,33,43,0.92); backdrop-filter: blur(12px);
+    background: var(--nav-bg); backdrop-filter: blur(12px);
     border-top: 1px solid var(--line); padding-bottom: var(--safe-b); }
   .bottomnav button { flex: 1; background: none; border: none; border-radius: 0;
     min-height: 60px; display: flex; flex-direction: column; align-items: center;
@@ -271,7 +294,7 @@
   .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
   .icon-btn .ic-svg { vertical-align: middle; }
   .loc-chip .ic-svg { vertical-align: -0.18em; }
-  .loc-chip.loading { color: var(--muted); background: rgba(255,255,255,0.04); border-color: var(--line); }
+  .loc-chip.loading { color: var(--muted); background: var(--hover-highlight); border-color: var(--line); }
   .loc-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line);
     border-top-color: var(--accent); display: inline-block; vertical-align: -2px;
     animation: spin 0.7s linear infinite; }
@@ -281,7 +304,7 @@
   /* ---- floating add button (FAB) ---- */
   .fab { position: fixed; left: 18px; bottom: calc(82px + var(--safe-b)); z-index: 55;
     width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
-    background: linear-gradient(135deg, var(--accent), #1fb98a); color: #06281f;
+    background: linear-gradient(135deg, var(--accent), #1fb98a); color: var(--btn-text);
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 10px 26px rgba(45,212,167,0.45), 0 2px 6px rgba(0,0,0,0.4);
     transition: transform 0.18s cubic-bezier(.2,.9,.3,1.4), box-shadow 0.18s ease;
@@ -308,7 +331,7 @@
 
   /* ---- skeleton loading ---- */
   .skel { height: 13px; border-radius: 6px; margin: 9px 0;
-    background: linear-gradient(90deg, var(--panel2) 25%, #2f3b4a 37%, var(--panel2) 63%);
+    background: linear-gradient(90deg, var(--panel2) 25%, var(--skel-mid) 37%, var(--panel2) 63%);
     background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
   .skel.short { width: 55%; }
   @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
@@ -365,6 +388,9 @@
     <h1><span class="b">Spliti</span></h1>
     <span class="sub">Spiti trip · split expenses</span>
   </div>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark mode" title="Toggle theme">
+    <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+  </button>
 </header>
 <div class="wrap">
   <main class="main" id="main">
@@ -375,6 +401,25 @@
 <script>
 const $ = (s, r=document) => r.querySelector(s);
 const fmt = c => (c<0?'-':'') + '₹' + (Math.abs(c)/100).toFixed(2);
+
+// ---- theme toggle (dark / light) ----
+const THEME_ICONS = {
+  dark: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  light: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+};
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f0f2f5' : '#0f1419';
+  $('#themeIcon').innerHTML = THEME_ICONS[theme];
+  localStorage.setItem('spliti-theme', theme);
+}
+(function initTheme() {
+  const saved = localStorage.getItem('spliti-theme');
+  applyTheme(saved || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
 
 // ---- crisp inline SVG icons (FontAwesome/Lucide style, inherit currentColor) ----
 const ICON_PATHS = {
