@@ -21,6 +21,44 @@ STATIC_DIR = Path(__file__).parent / "static"
 # The single group the UI locks onto for now (members/groups are managed out of band).
 DEFAULT_GROUP = "Spiti"
 
+# ---- expense categories ----
+CATEGORIES = {
+    "chai":       {"emoji": "🍵", "label": "Chai & Snacks",
+                   "keywords": ["chai", "tea", "coffee", "maggi", "snacks", "biscuit", "chips", "namkeen", "samosa", "pakora"]},
+    "meals":      {"emoji": "🍽️", "label": "Meals",
+                   "keywords": ["breakfast", "lunch", "dinner", "dhaba", "thali", "momo", "food", "biryani", "dal", "roti", "paratha"]},
+    "fuel":       {"emoji": "⛽", "label": "Fuel",
+                   "keywords": ["fuel", "petrol", "diesel", "gas", "filling"]},
+    "stay":       {"emoji": "🏨", "label": "Stay",
+                   "keywords": ["hotel", "homestay", "camp", "tent", "room", "lodge", "hostel", "airbnb", "resort", "night stay"]},
+    "transport":  {"emoji": "🚗", "label": "Transport",
+                   "keywords": ["toll", "parking", "cab", "taxi", "bus", "auto", "rickshaw", "bike", "rental", "ola", "uber"]},
+    "activities": {"emoji": "🎒", "label": "Activities",
+                   "keywords": ["trek", "rafting", "ticket", "entry", "permit", "paragliding", "camping", "safari", "museum", "temple"]},
+    "shopping":   {"emoji": "🛒", "label": "Shopping",
+                   "keywords": ["shopping", "souvenir", "clothes", "gift", "market", "handicraft"]},
+    "essentials": {"emoji": "💊", "label": "Essentials",
+                   "keywords": ["medicine", "pharmacy", "recharge", "sim", "atm", "laundry", "repair", "puncture", "mechanic"]},
+    "drinks":     {"emoji": "🍺", "label": "Drinks",
+                   "keywords": ["beer", "wine", "whisky", "rum", "alcohol", "bar", "pub", "old monk"]},
+    "tips":       {"emoji": "💡", "label": "Tips & Misc",
+                   "keywords": ["tip", "donation", "guide", "porter"]},
+    "other":      {"emoji": "📦", "label": "Other", "keywords": []},
+}
+
+VALID_CATEGORIES = set(CATEGORIES.keys())
+
+
+def detect_category(description: str) -> str:
+    """Auto-detect a category from an expense description using keyword matching."""
+    desc_lower = description.lower()
+    for cat_id, cat in CATEGORIES.items():
+        if cat_id == "other":
+            continue
+        if any(kw in desc_lower for kw in cat["keywords"]):
+            return cat_id
+    return "other"
+
 split_app = FastAPI(
     title="split",
     description="A Splitwise-style expense splitter",
@@ -90,6 +128,8 @@ class ExpenseCreate(BaseModel):
     # Optional client-generated id so a write created offline and replayed on
     # reconnect is applied exactly once (see db.expenses.client_id).
     client_id: str | None = Field(default=None, max_length=64)
+    # Expense category (auto-detected from description if omitted).
+    category: str | None = None
 
 
 class SettlementCreate(BaseModel):
@@ -197,7 +237,7 @@ def _group_detail(conn, gid: int) -> dict:
         {**dict(r), "deleted": bool(r["deleted_at"])}
         for r in conn.execute(
             """SELECT e.id, e.description, e.amount_paise, e.paid_by, e.added_by,
-                      e.created_at, e.deleted_at,
+                      e.created_at, e.deleted_at, e.category,
                       m.name AS paid_by_name, a.name AS added_by_name
                FROM expenses e
                JOIN members m ON m.id = e.paid_by
@@ -432,6 +472,21 @@ def notify_unsubscribe(body: UnsubscribeIn, user: str = Depends(authed_username)
         conn.close()
 
 
+@split_app.get("/api/categories")
+def get_categories() -> dict:
+    """Return available expense categories with emoji and labels."""
+    return {"categories": {
+        k: {"emoji": v["emoji"], "label": v["label"]}
+        for k, v in CATEGORIES.items()
+    }}
+
+
+@split_app.get("/api/detect-category")
+def api_detect_category(description: str = "") -> dict:
+    """Auto-detect a category from an expense description."""
+    return {"category": detect_category(description)}
+
+
 @split_app.get("/api/suggest-description", dependencies=[Depends(require_auth)])
 async def suggest_description(lat: float | None = None, lon: float | None = None) -> dict:
     """A time-of-day expense description suggestion (best-effort; empty if AI unavailable).
@@ -557,6 +612,7 @@ def add_expense(
             raise HTTPException(status_code=422, detail="payer is not in this group")
 
         total = to_paise(body.amount)
+        category = body.category if body.category in VALID_CATEGORIES else detect_category(body.description)
 
         if body.split_type == "equal":
             participants = body.members or sorted(valid)
@@ -579,9 +635,9 @@ def add_expense(
         try:
             cur = conn.execute(
                 "INSERT INTO expenses "
-                "(group_id, description, amount_paise, paid_by, added_by, client_id) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id),
+                "(group_id, description, amount_paise, paid_by, added_by, client_id, category) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id, category),
             )
             eid = cur.lastrowid
             conn.executemany(

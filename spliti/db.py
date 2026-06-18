@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- syncing the offline outbox is idempotent (exactly-once effect). NULL for
     -- rows created server-side before this existed / without a client.
     client_id    TEXT,
+    -- expense category (e.g. 'meals', 'fuel', 'stay'). 'other' for uncategorised.
+    category     TEXT NOT NULL DEFAULT 'other',
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     deleted_at   TEXT
 );
@@ -133,5 +135,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE expenses ADD COLUMN client_id TEXT")
     if "client_id" not in cols("settlements"):
         conn.execute("ALTER TABLE settlements ADD COLUMN client_id TEXT")
+    # expense category
+    if "category" not in cols("expenses"):
+        conn.execute("ALTER TABLE expenses ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
     # now that the columns exist on every DB, the unique indexes are safe to add
     conn.executescript(CLIENT_ID_INDEXES)

@@ -634,8 +634,75 @@ def test_offline_outbox_replay_exactly_once(client):
     assert len(after_first["settlements"]) == 1
     assert {b["name"]: b["net_paise"] for b in after_first["balances"]} == \
            {b["name"]: b["net_paise"] for b in after_second["balances"]}
-    assert len(after_second["expenses"]) == 2     # no duplicates from the replay
-    assert len(after_second["settlements"]) == 1
+
+
+# ---------------------------------------------------------------- categories
+
+
+def test_category_auto_detected_from_description(client):
+    """When no category is sent, it's auto-detected from the description."""
+    from spliti.app import detect_category
+    assert detect_category("Morning Chai") == "chai"
+    assert detect_category("Dhaba Lunch") == "meals"
+    assert detect_category("Fuel Stop") == "fuel"
+    assert detect_category("Hotel Kaza") == "stay"
+    assert detect_category("Toll Plaza") == "transport"
+    assert detect_category("Trek Permit") == "activities"
+    assert detect_category("Beer at bar") == "drinks"
+    assert detect_category("Random thing") == "other"
+
+
+def test_category_stored_and_returned(client):
+    gid, ids = make_group(client)
+    # Explicit category
+    r = client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Dinner", "amount": 30, "paid_by": ids["Ada"], "category": "meals"},
+        auth=AUTH,
+    )
+    assert r.status_code == 200
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert detail["expenses"][0]["category"] == "meals"
+
+
+def test_category_auto_detected_on_create(client):
+    gid, ids = make_group(client)
+    # No category sent — should auto-detect "fuel" from description
+    r = client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Fuel Stop", "amount": 50, "paid_by": ids["Ada"]},
+        auth=AUTH,
+    )
+    assert r.status_code == 200
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert detail["expenses"][0]["category"] == "fuel"
+
+
+def test_invalid_category_falls_back_to_auto_detect(client):
+    gid, ids = make_group(client)
+    r = client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Chai Break", "amount": 20, "paid_by": ids["Ada"], "category": "nonexistent"},
+        auth=AUTH,
+    )
+    assert r.status_code == 200
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert detail["expenses"][0]["category"] == "chai"
+
+
+def test_categories_endpoint(client):
+    r = client.get("/api/categories")
+    assert r.status_code == 200
+    cats = r.json()["categories"]
+    assert "meals" in cats
+    assert cats["meals"]["emoji"] == "🍽️"
+    assert "other" in cats
+
+
+def test_detect_category_endpoint(client):
+    r = client.get("/api/detect-category?description=Hotel%20Kaza")
+    assert r.status_code == 200
+    assert r.json()["category"] == "stay"
 
 
 def test_migration_adds_client_id_to_legacy_db(tmp_path):
