@@ -91,6 +91,10 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path or DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Wait briefly for a competing writer instead of failing immediately with
+    # "database is locked" — matters for the push BackgroundTask, which opens its
+    # own connection and may overlap a concurrent request's write.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

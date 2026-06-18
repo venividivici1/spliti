@@ -198,3 +198,45 @@ def test_resubscribe_same_endpoint_upserts(client, sent):
     subscribe(client, "Bo", "https://push/bo")
     subscribe(client, "Bo", "https://push/bo")  # same device again
     assert sub_count() == 1
+
+
+def test_unsubscribe_is_scoped_to_the_owner(client, sent):
+    """A member can't unsubscribe another member's device by passing its endpoint."""
+    make_group(client, members=("Ada", "Bo"))
+    subscribe(client, "Bo", "https://push/bo")
+    # Ada tries to drop Bo's subscription — should be a no-op, the row survives.
+    client.post("/api/notify/unsubscribe", json={"endpoint": "https://push/bo"}, auth=AUTH)
+    assert sub_count() == 1
+    # Bo (the owner) can drop it.
+    client.post(
+        "/api/notify/unsubscribe", json={"endpoint": "https://push/bo"},
+        auth=("Bo", TEST_PASSWORD),
+    )
+    assert sub_count() == 0
+
+
+def test_distinct_events_get_distinct_tags(client, sent):
+    """A constant tag would collapse a burst into one banner; tags must differ."""
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    subscribe(client, "Bo", "https://push/bo")
+    for desc in ("Dinner", "Cab"):
+        client.post(
+            f"/api/groups/{gid}/expenses",
+            json={"description": desc, "amount": 10, "paid_by": ids["Ada"]},
+            auth=AUTH,
+        )
+    tags = {s["payload"]["tag"] for s in sent}
+    assert len(sent) == 2 and len(tags) == 2
+
+
+def test_no_dispatch_when_group_has_no_subscribers(client, sent, monkeypatch):
+    """With nobody subscribed, the write path skips the balance snapshot + dispatch."""
+    gid, ids = make_group(client, members=("Ada", "Bo"))  # no subscribe()
+    calls = []
+    monkeypatch.setattr(notifications, "dispatch", lambda *a, **k: calls.append(a))
+    client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "X", "amount": 10, "paid_by": ids["Ada"]},
+        auth=AUTH,
+    )
+    assert calls == []

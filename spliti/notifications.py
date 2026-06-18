@@ -73,8 +73,17 @@ def save_subscription(conn, member_id: int, endpoint: str, p256dh: str, auth: st
     conn.commit()
 
 
-def delete_subscription(conn, endpoint: str) -> None:
-    conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+def delete_subscription(conn, endpoint: str, member_id: int | None = None) -> None:
+    """Remove a subscription by endpoint. Pass member_id to scope the delete to the
+    member who owns it (so one member can't unsubscribe another's device); leave it
+    None for internal pruning, where we already matched the endpoint to a member."""
+    if member_id is None:
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+    else:
+        conn.execute(
+            "DELETE FROM push_subscriptions WHERE endpoint = ? AND member_id = ?",
+            (endpoint, member_id),
+        )
     conn.commit()
 
 
@@ -83,6 +92,18 @@ def _subscriptions_for(conn, member_id: int):
         "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE member_id = ?",
         (member_id,),
     ).fetchall()
+
+
+def group_has_subscribers(conn, gid: int) -> bool:
+    """Cheap gate so the write path skips the balance snapshot and the dispatch
+    task entirely when nobody in the group has a push subscription (the feature can
+    be configured server-side with zero subscribers)."""
+    row = conn.execute(
+        "SELECT 1 FROM push_subscriptions s JOIN members m ON m.id = s.member_id "
+        "WHERE m.group_id = ? LIMIT 1",
+        (gid,),
+    ).fetchone()
+    return row is not None
 
 
 # ---------------------------------------------------------------- messages
@@ -113,7 +134,10 @@ def _build_payload(event_type: str, category: str, summary: dict, net_paise: int
         ctx = f"{summary['actor_name']} {verb} “{summary['description']}”"
 
     body = f"{ctx}. {_balance_line(net_paise)}." if category == "balance" else ctx
-    return {"title": "Spliti", "body": body, "url": "/", "tag": "spliti"}
+    # A tag unique to the event so distinct events stack instead of overwriting each
+    # other in the tray (a constant tag collapses a burst into a single banner).
+    tag = f"spliti-{event_type}-{summary.get('event_id', '')}"
+    return {"title": "Spliti", "body": body, "url": "/", "tag": tag}
 
 
 def _choose_category(prefs: dict, event_type: str, affected: bool) -> str | None:
@@ -131,7 +155,11 @@ def _choose_category(prefs: dict, event_type: str, affected: bool) -> str | None
 def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> bool:
     """Send a single push. Returns False only when the subscription is gone
     (404/410) and should be pruned; any other error is swallowed as transient."""
-    from pywebpush import WebPushException, webpush
+    try:
+        from pywebpush import WebPushException, webpush
+    except Exception:
+        # Dependency missing/broken — can't send, but keep the subscription.
+        return True
 
     s = get_settings()
     try:
@@ -177,12 +205,20 @@ def dispatch(
         for m in members:
             if m == actor_member_id:
                 continue
-            category = _choose_category(get_prefs(conn, m), event_type, m in affected)
-            if not category:
+            # Isolate each recipient: a locked write or a bad row for one member
+            # must not abort the rest (and dispatch must never raise — see below).
+            try:
+                category = _choose_category(get_prefs(conn, m), event_type, m in affected)
+                if not category:
+                    continue
+                payload = _build_payload(event_type, category, summary, net_by_member.get(m, 0))
+                for sub in _subscriptions_for(conn, m):
+                    if not _send_one(sub["endpoint"], sub["p256dh"], sub["auth"], payload):
+                        delete_subscription(conn, sub["endpoint"])
+            except Exception:
                 continue
-            payload = _build_payload(event_type, category, summary, net_by_member.get(m, 0))
-            for sub in _subscriptions_for(conn, m):
-                if not _send_one(sub["endpoint"], sub["p256dh"], sub["auth"], payload):
-                    delete_subscription(conn, sub["endpoint"])
+    except Exception:
+        # Runs after the response in a BackgroundTask: never raise into the worker.
+        pass
     finally:
         conn.close()

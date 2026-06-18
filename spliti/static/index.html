@@ -1694,12 +1694,25 @@ async function currentSubscription() {
   const reg = await navigator.serviceWorker.ready;
   return reg.pushManager.getSubscription();
 }
+function sameKey(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const x = new Uint8Array(a), y = new Uint8Array(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
 async function enablePush(publicKey) {
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') throw new Error('Notifications were not allowed');
   const reg = await navigator.serviceWorker.ready;
-  const sub = (await reg.pushManager.getSubscription())
-    || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
+  const appKey = urlB64ToUint8Array(publicKey);
+  let sub = await reg.pushManager.getSubscription();
+  // A subscription made with a different (rotated) VAPID key can never receive our
+  // pushes — drop it and re-subscribe with the current key.
+  if (sub && !sameKey(sub.options && sub.options.applicationServerKey, appKey.buffer)) {
+    try { await sub.unsubscribe(); } catch (_) {}
+    sub = null;
+  }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
   await api('POST', '/notify/subscribe', sub.toJSON());
 }
 async function disablePush() {

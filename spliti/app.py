@@ -265,7 +265,7 @@ def _net_by_member(detail: dict) -> dict[int, int]:
 
 def _notify_expense_change(conn, background_tasks, gid, eid, exp_row, user, *, restored):
     """Schedule a delete/restore push to the expense's participants (not the actor)."""
-    if not notifications.is_configured():
+    if not (notifications.is_configured() and notifications.group_has_subscribers(conn, gid)):
         return
     detail = _group_detail(conn, gid)
     participants = [
@@ -280,6 +280,7 @@ def _notify_expense_change(conn, background_tasks, gid, eid, exp_row, user, *, r
         "actor_name": actor["name"] if actor else "Someone",
         "description": exp_row["description"],
         "restored": restored,
+        "event_id": eid,
     }
     background_tasks.add_task(
         notifications.dispatch, gid, "delete_restore",
@@ -418,12 +419,14 @@ def notify_subscribe(body: PushSubscriptionIn, user: str = Depends(authed_userna
         conn.close()
 
 
-@split_app.post("/api/notify/unsubscribe", dependencies=[Depends(require_auth)])
-def notify_unsubscribe(body: UnsubscribeIn) -> dict:
-    """Drop a subscription (member toggled push off, or the browser revoked it)."""
+@split_app.post("/api/notify/unsubscribe")
+def notify_unsubscribe(body: UnsubscribeIn, user: str = Depends(authed_username)) -> dict:
+    """Drop a subscription (member toggled push off, or the browser revoked it).
+    Scoped to the signed-in member so no one can unsubscribe another member's device."""
     conn = db.connect()
     try:
-        notifications.delete_subscription(conn, body.endpoint)
+        _, member = _current_member_or_403(conn, user)
+        notifications.delete_subscription(conn, body.endpoint, member["id"])
         return {"ok": True}
     finally:
         conn.close()
@@ -509,11 +512,18 @@ def add_member(gid: int, body: MemberCreate) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
+        name = body.name.strip()
+        # Names are identities here (login is by name, and notifications resolve the
+        # acting member by name), so they must be unique within a group.
+        if _member_by_name(conn, gid, name):
+            raise HTTPException(
+                status_code=409, detail="a member with that name already exists"
+            )
         cur = conn.execute(
-            "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, body.name.strip())
+            "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, name)
         )
         conn.commit()
-        return {"id": cur.lastrowid, "name": body.name.strip(), "group_id": gid}
+        return {"id": cur.lastrowid, "name": name, "group_id": gid}
     finally:
         conn.close()
 
@@ -589,12 +599,13 @@ def add_expense(
                 return {"id": dup, "duplicate": True}
             raise
 
-        if notifications.is_configured():
+        if notifications.is_configured() and notifications.group_has_subscribers(conn, gid):
             detail = _group_detail(conn, gid)
             summary = {
                 "actor_name": adder["name"],
                 "description": body.description.strip(),
                 "amount_paise": total,
+                "event_id": eid,
             }
             background_tasks.add_task(
                 notifications.dispatch, gid, "new_expense", adder["id"],
@@ -708,7 +719,7 @@ def add_settlement(
                 return {"id": dup, "duplicate": True}
             raise
 
-        if notifications.is_configured():
+        if notifications.is_configured() and notifications.group_has_subscribers(conn, gid):
             detail = _group_detail(conn, gid)
             name_of = {m["id"]: m["name"] for m in detail["members"]}
             actor = _member_by_name(conn, gid, user)
@@ -716,6 +727,7 @@ def add_settlement(
                 "from_name": name_of.get(body.from_member, "Someone"),
                 "to_name": name_of.get(body.to_member, "someone"),
                 "amount_paise": amount_paise,
+                "event_id": cur.lastrowid,
             }
             background_tasks.add_task(
                 notifications.dispatch, gid, "settlement",
