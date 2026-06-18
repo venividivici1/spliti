@@ -180,6 +180,41 @@ def mirror_group(gid: int) -> None:
         pass
 
 
+def mirror_all_groups() -> None:
+    """Back-fill the mirror with every existing group (initial sync on startup).
+
+    Lets the cloud copy converge to the full local state the first time the
+    mirror is enabled, instead of waiting for each group's next write. No-op when
+    disabled; best-effort so startup never fails on a Firestore error."""
+    if not is_configured():
+        return
+    try:
+        conn = db.connect()
+        try:
+            gids = [r["id"] for r in conn.execute("SELECT id FROM groups ORDER BY id")]
+        finally:
+            conn.close()
+    except Exception:
+        return
+    for gid in gids:
+        mirror_group(gid)  # already best-effort + idempotent per group
+
+
+def start_initial_sync() -> None:
+    """Run mirror_all_groups off the request/startup path so it never blocks.
+
+    Called when the app starts serving. Spawns a daemon thread (so a slow or
+    failing initial sync can't delay startup or shutdown) only when the mirror is
+    configured; otherwise it's a no-op."""
+    if not is_configured():
+        return
+    import threading
+
+    threading.Thread(
+        target=mirror_all_groups, name="firestore-initial-sync", daemon=True
+    ).start()
+
+
 def delete_group(gid: int) -> None:
     """Background entry point: remove a group (and its subcollections) from the
     mirror after it was deleted in SQLite. Best-effort and no-op when disabled."""
