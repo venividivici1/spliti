@@ -8,13 +8,13 @@ import secrets
 import sqlite3
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from spliti.config import get_settings
-from spliti import ask, balances, db
+from spliti import ask, balances, db, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -97,6 +97,28 @@ class SettlementCreate(BaseModel):
     to_member: int
     amount: float = Field(gt=0)
     client_id: str | None = Field(default=None, max_length=64)
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=100)
+
+
+class PushSubscriptionIn(BaseModel):
+    # Shape of the browser's PushSubscription.toJSON(); expirationTime is ignored.
+    endpoint: str = Field(min_length=1, max_length=1000)
+    keys: PushKeys
+
+
+class UnsubscribeIn(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=1000)
+
+
+class NotifyPrefsIn(BaseModel):
+    new_expense: bool = True
+    settlement: bool = True
+    balance: bool = True
+    delete_restore: bool = True
 
 
 class ChatTurn(BaseModel):
@@ -236,6 +258,36 @@ def _group_detail(conn, gid: int) -> dict:
     }
 
 
+def _net_by_member(detail: dict) -> dict[int, int]:
+    """Map member_id -> net paise from a group detail, for push personalisation."""
+    return {b["member_id"]: b["net_paise"] for b in detail["balances"]}
+
+
+def _notify_expense_change(conn, background_tasks, gid, eid, exp_row, user, *, restored):
+    """Schedule a delete/restore push to the expense's participants (not the actor)."""
+    if not (notifications.is_configured() and notifications.group_has_subscribers(conn, gid)):
+        return
+    detail = _group_detail(conn, gid)
+    participants = [
+        r["member_id"]
+        for r in conn.execute(
+            "SELECT member_id FROM expense_shares WHERE expense_id = ?", (eid,)
+        )
+    ]
+    affected = list(set(participants) | {exp_row["paid_by"]})
+    actor = _member_by_name(conn, gid, user)
+    summary = {
+        "actor_name": actor["name"] if actor else "Someone",
+        "description": exp_row["description"],
+        "restored": restored,
+        "event_id": eid,
+    }
+    background_tasks.add_task(
+        notifications.dispatch, gid, "delete_restore",
+        actor["id"] if actor else None, affected, _net_by_member(detail), summary,
+    )
+
+
 # ---------------------------------------------------------------- routes
 
 
@@ -311,6 +363,71 @@ def current_group() -> dict:
     conn = db.connect()
     try:
         return _group_detail(conn, _default_group_id(conn))
+    finally:
+        conn.close()
+
+
+def _current_member_or_403(conn, user: str) -> tuple[int, dict]:
+    """Resolve the signed-in name to a member of the fixed group, or 403."""
+    gid = _default_group_id(conn)
+    member = _member_by_name(conn, gid, user)
+    if not member:
+        raise HTTPException(
+            status_code=403, detail="you must sign in as a member of this group"
+        )
+    return gid, member
+
+
+@split_app.get("/api/notify/config", dependencies=[Depends(require_auth)])
+def notify_config() -> dict:
+    """Whether push is available here, and the VAPID key the browser subscribes with."""
+    return {"enabled": notifications.is_configured(), "public_key": notifications.public_key()}
+
+
+@split_app.get("/api/notify/prefs")
+def get_notify_prefs(user: str = Depends(authed_username)) -> dict:
+    conn = db.connect()
+    try:
+        _, member = _current_member_or_403(conn, user)
+        return notifications.get_prefs(conn, member["id"])
+    finally:
+        conn.close()
+
+
+@split_app.put("/api/notify/prefs")
+def put_notify_prefs(body: NotifyPrefsIn, user: str = Depends(authed_username)) -> dict:
+    conn = db.connect()
+    try:
+        _, member = _current_member_or_403(conn, user)
+        return notifications.set_prefs(conn, member["id"], body.model_dump())
+    finally:
+        conn.close()
+
+
+@split_app.post("/api/notify/subscribe")
+def notify_subscribe(body: PushSubscriptionIn, user: str = Depends(authed_username)) -> dict:
+    if not notifications.is_configured():
+        raise HTTPException(status_code=503, detail="notifications are not configured")
+    conn = db.connect()
+    try:
+        _, member = _current_member_or_403(conn, user)
+        notifications.save_subscription(
+            conn, member["id"], body.endpoint, body.keys.p256dh, body.keys.auth
+        )
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@split_app.post("/api/notify/unsubscribe")
+def notify_unsubscribe(body: UnsubscribeIn, user: str = Depends(authed_username)) -> dict:
+    """Drop a subscription (member toggled push off, or the browser revoked it).
+    Scoped to the signed-in member so no one can unsubscribe another member's device."""
+    conn = db.connect()
+    try:
+        _, member = _current_member_or_403(conn, user)
+        notifications.delete_subscription(conn, body.endpoint, member["id"])
+        return {"ok": True}
     finally:
         conn.close()
 
@@ -395,17 +512,29 @@ def add_member(gid: int, body: MemberCreate) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
+        name = body.name.strip()
+        # Names are identities here (login is by name, and notifications resolve the
+        # acting member by name), so they must be unique within a group.
+        if _member_by_name(conn, gid, name):
+            raise HTTPException(
+                status_code=409, detail="a member with that name already exists"
+            )
         cur = conn.execute(
-            "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, body.name.strip())
+            "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, name)
         )
         conn.commit()
-        return {"id": cur.lastrowid, "name": body.name.strip(), "group_id": gid}
+        return {"id": cur.lastrowid, "name": name, "group_id": gid}
     finally:
         conn.close()
 
 
 @split_app.post("/api/groups/{gid}/expenses")
-def add_expense(gid: int, body: ExpenseCreate, user: str = Depends(authed_username)) -> dict:
+def add_expense(
+    gid: int,
+    body: ExpenseCreate,
+    background_tasks: BackgroundTasks,
+    user: str = Depends(authed_username),
+) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
@@ -469,47 +598,71 @@ def add_expense(gid: int, body: ExpenseCreate, user: str = Depends(authed_userna
             if dup is not None:
                 return {"id": dup, "duplicate": True}
             raise
+
+        if notifications.is_configured() and notifications.group_has_subscribers(conn, gid):
+            detail = _group_detail(conn, gid)
+            summary = {
+                "actor_name": adder["name"],
+                "description": body.description.strip(),
+                "amount_paise": total,
+                "event_id": eid,
+            }
+            background_tasks.add_task(
+                notifications.dispatch, gid, "new_expense", adder["id"],
+                list(set(share_map) | {body.paid_by}), _net_by_member(detail), summary,
+            )
         return {"id": eid}
     finally:
         conn.close()
 
 
-@split_app.delete(
-    "/api/groups/{gid}/expenses/{eid}", dependencies=[Depends(require_auth)]
-)
-def delete_expense(gid: int, eid: int) -> dict:
+@split_app.delete("/api/groups/{gid}/expenses/{eid}")
+def delete_expense(
+    gid: int, eid: int, background_tasks: BackgroundTasks,
+    user: str = Depends(authed_username),
+) -> dict:
     """Soft-delete: keep the row (so it stays in history and can be restored)."""
     conn = db.connect()
     try:
         row = conn.execute(
-            "SELECT id FROM expenses WHERE id = ? AND group_id = ?", (eid, gid)
+            "SELECT id, description, paid_by FROM expenses WHERE id = ? AND group_id = ?",
+            (eid, gid),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="expense not found")
-        conn.execute(
+        cur = conn.execute(
             "UPDATE expenses SET deleted_at = datetime('now') "
             "WHERE id = ? AND deleted_at IS NULL",
             (eid,),
         )
         conn.commit()
+        if cur.rowcount:  # only notify on a real state change (not a replayed delete)
+            _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=False)
         return {"deleted": eid}
     finally:
         conn.close()
 
 
-@split_app.post(
-    "/api/groups/{gid}/expenses/{eid}/restore", dependencies=[Depends(require_auth)]
-)
-def restore_expense(gid: int, eid: int) -> dict:
+@split_app.post("/api/groups/{gid}/expenses/{eid}/restore")
+def restore_expense(
+    gid: int, eid: int, background_tasks: BackgroundTasks,
+    user: str = Depends(authed_username),
+) -> dict:
     conn = db.connect()
     try:
         row = conn.execute(
-            "SELECT id FROM expenses WHERE id = ? AND group_id = ?", (eid, gid)
+            "SELECT id, description, paid_by FROM expenses WHERE id = ? AND group_id = ?",
+            (eid, gid),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="expense not found")
-        conn.execute("UPDATE expenses SET deleted_at = NULL WHERE id = ?", (eid,))
+        cur = conn.execute(
+            "UPDATE expenses SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+            (eid,),
+        )
         conn.commit()
+        if cur.rowcount:
+            _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=True)
         return {"restored": eid}
     finally:
         conn.close()
@@ -532,8 +685,11 @@ async def ask_group(gid: int, body: AskRequest) -> StreamingResponse:
     )
 
 
-@split_app.post("/api/groups/{gid}/settlements", dependencies=[Depends(require_auth)])
-def add_settlement(gid: int, body: SettlementCreate) -> dict:
+@split_app.post("/api/groups/{gid}/settlements")
+def add_settlement(
+    gid: int, body: SettlementCreate, background_tasks: BackgroundTasks,
+    user: str = Depends(authed_username),
+) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
@@ -545,12 +701,13 @@ def add_settlement(gid: int, body: SettlementCreate) -> dict:
             raise HTTPException(status_code=422, detail="member not in this group")
         if body.from_member == body.to_member:
             raise HTTPException(status_code=422, detail="cannot settle with yourself")
+        amount_paise = to_paise(body.amount)
         try:
             cur = conn.execute(
                 "INSERT INTO settlements "
                 "(group_id, from_member, to_member, amount_paise, client_id) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (gid, body.from_member, body.to_member, to_paise(body.amount), body.client_id),
+                (gid, body.from_member, body.to_member, amount_paise, body.client_id),
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -561,6 +718,22 @@ def add_settlement(gid: int, body: SettlementCreate) -> dict:
             if dup is not None:
                 return {"id": dup, "duplicate": True}
             raise
+
+        if notifications.is_configured() and notifications.group_has_subscribers(conn, gid):
+            detail = _group_detail(conn, gid)
+            name_of = {m["id"]: m["name"] for m in detail["members"]}
+            actor = _member_by_name(conn, gid, user)
+            summary = {
+                "from_name": name_of.get(body.from_member, "Someone"),
+                "to_name": name_of.get(body.to_member, "someone"),
+                "amount_paise": amount_paise,
+                "event_id": cur.lastrowid,
+            }
+            background_tasks.add_task(
+                notifications.dispatch, gid, "settlement",
+                actor["id"] if actor else None,
+                [body.from_member, body.to_member], _net_by_member(detail), summary,
+            )
         return {"id": cur.lastrowid}
     finally:
         conn.close()

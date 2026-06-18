@@ -280,6 +280,14 @@
   .modal-msg { color: var(--muted); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
   button.danger { background: var(--red); color: var(--btn-text); }
+  /* notification settings rows */
+  .notif-row { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line);
+    color: var(--text); font-size: 14px; text-align: left; }
+  .notif-row:last-child { border-bottom: none; }
+  .notif-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+  .notif-cats.dim { opacity: 0.45; pointer-events: none; }
+  .notif-lead { font-weight: 600; }
   button.danger:hover { background: #e0566f; color: #fff; }
   .modal.success { text-align: center; }
   .modal.success .modal-title { font-size: 19px; margin-bottom: 16px; }
@@ -419,6 +427,9 @@
   <button class="syncbtn" id="netBadge" type="button" aria-live="polite" title="Sync status"></button>
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark mode" title="Toggle theme">
     <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+  </button>
+  <button class="theme-toggle" id="settingsBtn" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
   </button>
 </header>
 <div class="wrap">
@@ -1696,6 +1707,115 @@ $('#netBadge').onclick = () => {
 };
 loadCurrent();
 
+// ============================================================================
+//  Push notifications — subscribe via the service worker, manage per-category prefs
+// ============================================================================
+const NOTIFY_CATS = [
+  ['new_expense', 'New expenses'],
+  ['settlement', 'Settlements'],
+  ['balance', 'When you owe or are owed'],
+  ['delete_restore', 'Deleted or restored expenses'],
+];
+const pushSupported = () =>
+  'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+function sameKey(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const x = new Uint8Array(a), y = new Uint8Array(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+async function enablePush(publicKey) {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Notifications were not allowed');
+  const reg = await navigator.serviceWorker.ready;
+  const appKey = urlB64ToUint8Array(publicKey);
+  let sub = await reg.pushManager.getSubscription();
+  // A subscription made with a different (rotated) VAPID key can never receive our
+  // pushes — drop it and re-subscribe with the current key.
+  if (sub && !sameKey(sub.options && sub.options.applicationServerKey, appKey.buffer)) {
+    try { await sub.unsubscribe(); } catch (_) {}
+    sub = null;
+  }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+  await api('POST', '/notify/subscribe', sub.toJSON());
+}
+async function disablePush() {
+  const sub = await currentSubscription();
+  if (!sub) return;
+  try { await api('POST', '/notify/unsubscribe', { endpoint: sub.endpoint }); } catch (_) {}
+  await sub.unsubscribe();
+}
+
+async function renderSettings(box) {
+  if (!pushSupported()) {
+    box.innerHTML = '<p class="muted">Notifications aren’t supported on this device or browser. On iPhone, install the app to your Home Screen first (Share → Add to Home Screen).</p>';
+    return;
+  }
+  let cfg = { enabled: false };
+  try { cfg = await api('GET', '/notify/config'); } catch (_) {}
+  if (!cfg.enabled) {
+    box.innerHTML = '<p class="muted">Notifications aren’t set up on the server yet.</p>';
+    return;
+  }
+  let prefs = {};
+  try { prefs = await api('GET', '/notify/prefs'); } catch (_) {}
+  const sub = await currentSubscription();
+  const denied = Notification.permission === 'denied';
+  const on = !!sub && Notification.permission === 'granted';
+  box.innerHTML = `
+    <label class="notif-row"><span class="notif-lead">Enable notifications</span>
+      <input type="checkbox" id="notifMaster" ${on ? 'checked' : ''} ${denied ? 'disabled' : ''}></label>
+    ${denied ? '<p class="muted">Blocked in your browser/OS settings — re-enable Spliti notifications there to turn this on.</p>' : ''}
+    <div class="notif-cats ${on ? '' : 'dim'}" id="notifCats">
+      ${NOTIFY_CATS.map(([k, label]) => `<label class="notif-row"><span>${label}</span>
+        <input type="checkbox" data-cat="${k}" ${prefs[k] !== false ? 'checked' : ''}></label>`).join('')}
+    </div>`;
+  const master = box.querySelector('#notifMaster');
+  if (master) master.onchange = async () => {
+    master.disabled = true;
+    try {
+      if (master.checked) { await enablePush(cfg.public_key); toast('Notifications on'); }
+      else { await disablePush(); toast('Notifications off'); }
+    } catch (e) { toast(e.message || 'Couldn’t change notifications'); }
+    renderSettings(box);  // reflect the new state (also re-enables the control)
+  };
+  box.querySelectorAll('[data-cat]').forEach(cb => cb.onchange = async () => {
+    const next = {};
+    box.querySelectorAll('[data-cat]').forEach(c => { next[c.dataset.cat] = c.checked; });
+    try { await api('PUT', '/notify/prefs', next); } catch (_) { toast('Couldn’t save that preference'); }
+  });
+}
+
+function settingsModal() {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal">
+    <div class="modal-title">Notifications</div>
+    <div id="setBody" class="modal-msg" style="margin-bottom:14px">Loading…</div>
+    <div class="modal-actions"><button data-act="ok">Done</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=ok]').onclick = close;
+  ov.onclick = e => { if (e.target === ov) close(); };
+  renderSettings(ov.querySelector('#setBody'));
+}
+$('#settingsBtn').onclick = settingsModal;
+
 // Background sync: periodically retry the outbox and pull in anything other
 // members added. flush() guards against overlap and attempts the network itself
 // (it doesn't trust navigator.onLine), so firing it on a timer, on regaining
@@ -1710,6 +1830,11 @@ window.addEventListener('focus', () => { if (state.current) flush(); });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+  // A push that arrives while the app is open asks us to sync in place rather
+  // than show a banner (see sw.js) — reuse the normal sync path.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'sync' && state.current) flush();
   });
 }
 </script>

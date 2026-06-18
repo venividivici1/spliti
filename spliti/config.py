@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # Leave empty to run without any AI features.
     mistral_api_key: str = ""
 
+    # Web Push (VAPID). Leave the keys empty to run with notifications disabled —
+    # the API then reports the feature as unavailable and the UI hides it, the
+    # same way chat degrades without a Mistral key. Generate a pair with
+    # `python scripts/gen_vapid.py`. The private key is a secret; the public
+    # (application server) key is handed to the browser to subscribe.
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+    vapid_subject: str = "mailto:admin@example.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

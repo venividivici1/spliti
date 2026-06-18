@@ -265,6 +265,13 @@ def test_payer_must_be_member(client):
     assert r.status_code == 422
 
 
+def test_duplicate_member_name_rejected(client):
+    """Names are identities (login + actor resolution), so they must be unique."""
+    gid, _ = make_group(client, members=("Ada",))
+    dup = client.post(f"/api/groups/{gid}/members", json={"name": "ada"}, auth=AUTH)
+    assert dup.status_code == 409  # case-insensitive
+
+
 def test_me_identifies_member_and_rejects_strangers(client):
     make_group(client, name="Spiti", members=("Ada", "Bo"))
     ok = client.get("/api/me", auth=("Ada", TEST_PASSWORD))

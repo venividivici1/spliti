@@ -52,6 +52,27 @@ CREATE TABLE IF NOT EXISTS settlements (
     client_id    TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Web Push subscriptions: one row per installed device, tied to the member who
+-- subscribed. endpoint is unique so re-subscribing the same device upserts.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    endpoint   TEXT NOT NULL UNIQUE,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-member notification preferences. A missing row means "all on" (the default
+-- for a member who never opened settings), so we only insert when they change one.
+CREATE TABLE IF NOT EXISTS notify_prefs (
+    member_id      INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+    new_expense    INTEGER NOT NULL DEFAULT 1,
+    settlement     INTEGER NOT NULL DEFAULT 1,
+    balance        INTEGER NOT NULL DEFAULT 1,
+    delete_restore INTEGER NOT NULL DEFAULT 1
+);
 """
 
 # Dedup replayed offline writes: a given client_id can exist at most once.
@@ -70,6 +91,10 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path or DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Wait briefly for a competing writer instead of failing immediately with
+    # "database is locked" — matters for the push BackgroundTask, which opens its
+    # own connection and may overlap a concurrent request's write.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
