@@ -43,6 +43,12 @@
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; font: 16px/1.55 var(--font-body);
+    /* Fill the viewport so the fixed gradient always covers the screen. Without
+       this, a short tab (empty History/Balance) leaves the body shorter than the
+       viewport and iOS clips the fixed background, exposing a bare band below the
+       header. min-height:100dvh tracks the dynamic toolbar; 100vh is the fallback. */
+    min-height: 100vh; min-height: 100dvh;
+    display: flex; flex-direction: column;
     background:
       radial-gradient(1100px 460px at 100% -8%, rgba(45,212,167,0.10), transparent 60%),
       radial-gradient(900px 420px at -10% 0%, rgba(122,162,247,0.08), transparent 55%),
@@ -63,7 +69,7 @@
   .theme-toggle svg { width: 18px; height: 18px; }
 
   /* ---- header (mobile-first, sticky) ---- */
-  header { position: sticky; top: 0; z-index: 10;
+  header { position: sticky; top: 0; z-index: 10; flex: none;
     background: linear-gradient(180deg, var(--header-bg), var(--header-bg2));
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     padding: calc(13px + env(safe-area-inset-top, 0px)) 16px 13px;
@@ -78,8 +84,9 @@
   header .sub { color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
 
   /* ---- layout: single centered column ---- */
-  .wrap { display: block; }
-  .main { padding: 16px; padding-bottom: calc(86px + var(--safe-b)); }
+  /* wrap/main grow to fill the viewport so short tabs don't leave a gap. */
+  .wrap { display: flex; flex-direction: column; flex: 1 0 auto; }
+  .main { flex: 1 0 auto; padding: 16px; padding-bottom: calc(86px + var(--safe-b)); }
 
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted);
     margin: 0 0 10px; }
