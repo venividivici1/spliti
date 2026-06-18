@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 
-from spliti import db
+from spliti import db, notifications
 from spliti.config import get_settings
 
 
@@ -29,7 +29,14 @@ def main() -> None:
     s = get_settings()
     print("== config ==")
     print(f"  DB path:           {db.DB_PATH if not args.db else args.db}")
-    print(f"  VAPID_PRIVATE_KEY: {'set' if s.vapid_private_key else 'MISSING'}")
+    pk = s.vapid_private_key or ""
+    fmt = ("missing" if not pk
+           else "PEM (multi-line, ok)" if pk.lstrip().startswith("-----") and "\n" in pk
+           else "PEM but FLATTENED — newlines lost (will be repaired)"
+           if "-----BEGIN" in pk and "\n" not in pk and "\\n" not in pk
+           else "PEM with literal \\n (will be repaired)" if "\\n" in pk
+           else "raw / unknown")
+    print(f"  VAPID_PRIVATE_KEY: {'set' if pk else 'MISSING'} [{fmt}]")
     print(f"  VAPID_PUBLIC_KEY:  {'set' if s.vapid_public_key else 'MISSING'}")
     print(f"  VAPID_SUBJECT:     {s.vapid_subject or 'MISSING'}")
     if not (s.vapid_private_key and s.vapid_public_key):
@@ -77,7 +84,7 @@ def main() -> None:
                 subscription_info={"endpoint": r["endpoint"],
                                    "keys": {"p256dh": r["p256dh"], "auth": r["auth"]}},
                 data=payload,
-                vapid_private_key=s.vapid_private_key,
+                vapid_private_key=notifications.normalize_vapid_private_key(s.vapid_private_key),
                 vapid_claims={"sub": s.vapid_subject},
                 timeout=10,
             )

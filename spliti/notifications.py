@@ -152,6 +152,30 @@ def _choose_category(prefs: dict, event_type: str, affected: bool) -> str | None
 # ---------------------------------------------------------------- send
 
 
+def normalize_vapid_private_key(key: str) -> str:
+    """Repair a VAPID private key whose PEM line breaks were lost in transit.
+
+    A PKCS8 PEM only parses with its newlines intact, but storing it in a shell
+    `export`, a systemd `Environment=`, or a hand-edited `.env` often flattens it
+    to one line or escapes the newlines as a literal ``\\n`` — which makes
+    pywebpush fail with "Could not deserialize key data … ASN.1 parsing error".
+    We undo both: turn literal ``\\n`` back into real newlines, and re-wrap a
+    single-line ``-----BEGIN…-----`` blob into 64-char base64 lines. A
+    well-formed key (or a raw, dash-less key) passes through untouched.
+    """
+    import re
+
+    key = (key or "").strip().replace("\\n", "\n")
+    if "-----BEGIN" in key and "\n" not in key:
+        m = re.match(r"-----BEGIN ([A-Z0-9 ]+)-----(.*?)-----END \1-----", key)
+        if m:
+            label = m.group(1)
+            body = re.sub(r"\s+", "", m.group(2))
+            wrapped = "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+            key = f"-----BEGIN {label}-----\n{wrapped}\n-----END {label}-----"
+    return key
+
+
 def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> bool:
     """Send a single push. Returns False only when the subscription is gone
     (404/410) and should be pruned; any other error is swallowed as transient."""
@@ -166,7 +190,7 @@ def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> bool:
         webpush(
             subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
             data=json.dumps(payload),
-            vapid_private_key=s.vapid_private_key,
+            vapid_private_key=normalize_vapid_private_key(s.vapid_private_key),
             vapid_claims={"sub": s.vapid_subject},
             timeout=10,
         )
