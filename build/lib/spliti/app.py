@@ -4,11 +4,8 @@ Runs standalone (uvicorn spliti.app:split_app); was previously host-mounted in t
 Money crosses the API as decimal amounts but is stored/computed as integer paise.
 """
 
-import csv
-import io
 import secrets
 import sqlite3
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
@@ -17,59 +14,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from spliti.config import get_settings
-from spliti import ask, balances, db, firestore_sync, notifications
+from spliti import ask, balances, db, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 # The single group the UI locks onto for now (members/groups are managed out of band).
 DEFAULT_GROUP = "Spiti"
-
-# ---- expense categories ----
-CATEGORIES = {
-    "chai":       {"emoji": "🍵", "label": "Chai & Snacks",
-                   "keywords": ["chai", "tea", "coffee", "maggi", "snacks", "biscuit", "chips", "namkeen", "samosa", "pakora"]},
-    "meals":      {"emoji": "🍽️", "label": "Meals",
-                   "keywords": ["breakfast", "lunch", "dinner", "dhaba", "thali", "momo", "food", "biryani", "dal", "roti", "paratha"]},
-    "fuel":       {"emoji": "⛽", "label": "Fuel",
-                   "keywords": ["fuel", "petrol", "diesel", "gas", "filling"]},
-    "stay":       {"emoji": "🏨", "label": "Stay",
-                   "keywords": ["hotel", "homestay", "camp", "tent", "room", "lodge", "hostel", "airbnb", "resort", "night stay"]},
-    "transport":  {"emoji": "🚗", "label": "Transport",
-                   "keywords": ["toll", "parking", "cab", "taxi", "bus", "auto", "rickshaw", "bike", "rental", "ola", "uber"]},
-    "activities": {"emoji": "🎒", "label": "Activities",
-                   "keywords": ["trek", "rafting", "ticket", "entry", "permit", "paragliding", "camping", "safari", "museum", "temple"]},
-    "shopping":   {"emoji": "🛒", "label": "Shopping",
-                   "keywords": ["shopping", "souvenir", "clothes", "gift", "market", "handicraft"]},
-    "essentials": {"emoji": "💊", "label": "Essentials",
-                   "keywords": ["medicine", "pharmacy", "recharge", "sim", "atm", "laundry", "repair", "puncture", "mechanic"]},
-    "drinks":     {"emoji": "🍺", "label": "Drinks",
-                   "keywords": ["beer", "wine", "whisky", "rum", "alcohol", "bar", "pub", "old monk"]},
-    "tips":       {"emoji": "💡", "label": "Tips & Misc",
-                   "keywords": ["tip", "donation", "guide", "porter"]},
-    "other":      {"emoji": "📦", "label": "Other", "keywords": []},
-}
-
-VALID_CATEGORIES = set(CATEGORIES.keys())
-
-
-def detect_category(description: str) -> str:
-    """Auto-detect a category from an expense description using keyword matching."""
-    desc_lower = description.lower()
-    for cat_id, cat in CATEGORIES.items():
-        if cat_id == "other":
-            continue
-        if any(kw in desc_lower for kw in cat["keywords"]):
-            return cat_id
-    return "other"
-
-@asynccontextmanager
-async def _lifespan(_app: FastAPI):
-    # On startup, back-fill the Firestore mirror with all existing groups so the
-    # cloud copy converges to local state on load (not just on the next write).
-    # Off-thread and best-effort; a no-op when the mirror is disabled.
-    firestore_sync.start_initial_sync()
-    yield
-
 
 split_app = FastAPI(
     title="split",
@@ -77,7 +27,6 @@ split_app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
-    lifespan=_lifespan,
 )
 # auto_error=False so a missing/invalid header doesn't auto-respond with
 # `WWW-Authenticate: Basic`. That header makes browsers (notably iOS PWAs) pop
@@ -141,8 +90,6 @@ class ExpenseCreate(BaseModel):
     # Optional client-generated id so a write created offline and replayed on
     # reconnect is applied exactly once (see db.expenses.client_id).
     client_id: str | None = Field(default=None, max_length=64)
-    # Expense category (auto-detected from description if omitted).
-    category: str | None = None
 
 
 class SettlementCreate(BaseModel):
@@ -250,7 +197,7 @@ def _group_detail(conn, gid: int) -> dict:
         {**dict(r), "deleted": bool(r["deleted_at"])}
         for r in conn.execute(
             """SELECT e.id, e.description, e.amount_paise, e.paid_by, e.added_by,
-                      e.created_at, e.deleted_at, e.category,
+                      e.created_at, e.deleted_at,
                       m.name AS paid_by_name, a.name AS added_by_name
                FROM expenses e
                JOIN members m ON m.id = e.paid_by
@@ -485,21 +432,6 @@ def notify_unsubscribe(body: UnsubscribeIn, user: str = Depends(authed_username)
         conn.close()
 
 
-@split_app.get("/api/categories")
-def get_categories() -> dict:
-    """Return available expense categories with emoji and labels."""
-    return {"categories": {
-        k: {"emoji": v["emoji"], "label": v["label"]}
-        for k, v in CATEGORIES.items()
-    }}
-
-
-@split_app.get("/api/detect-category")
-def api_detect_category(description: str = "") -> dict:
-    """Auto-detect a category from an expense description."""
-    return {"category": detect_category(description)}
-
-
 @split_app.get("/api/suggest-description", dependencies=[Depends(require_auth)])
 async def suggest_description(lat: float | None = None, lon: float | None = None) -> dict:
     """A time-of-day expense description suggestion (best-effort; empty if AI unavailable).
@@ -544,12 +476,11 @@ def list_groups() -> dict:
 
 
 @split_app.post("/api/groups", dependencies=[Depends(require_auth)])
-def create_group(body: GroupCreate, background_tasks: BackgroundTasks) -> dict:
+def create_group(body: GroupCreate) -> dict:
     conn = db.connect()
     try:
         cur = conn.execute("INSERT INTO groups (name) VALUES (?)", (body.name.strip(),))
         conn.commit()
-        background_tasks.add_task(firestore_sync.mirror_group, cur.lastrowid)
         return {"id": cur.lastrowid, "name": body.name.strip()}
     finally:
         conn.close()
@@ -564,83 +495,20 @@ def get_group(gid: int) -> dict:
         conn.close()
 
 
-@split_app.get("/api/groups/{gid}/export/csv", dependencies=[Depends(require_auth)])
-def export_csv(gid: int) -> StreamingResponse:
-    """Export all expenses (active + deleted) and settlements as a CSV download."""
-    conn = db.connect()
-    try:
-        group = _group_or_404(conn, gid)
-        detail = _group_detail(conn, gid)
-
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-
-        # Expenses sheet
-        writer.writerow(["Type", "Description", "Category", "Amount (₹)", "Paid By",
-                         "Added By", "Split Among", "Date", "Status"])
-        for e in detail["expenses"]:
-            shares_str = ", ".join(
-                f"{s['name']} (₹{s['share_paise']/100:.2f})" for s in e.get("shares", [])
-            )
-            writer.writerow([
-                "Expense",
-                e["description"],
-                e.get("category", "other"),
-                f"{e['amount_paise']/100:.2f}",
-                e["paid_by_name"],
-                e.get("added_by_name") or "",
-                shares_str,
-                e["created_at"],
-                "Deleted" if e["deleted"] else "Active",
-            ])
-
-        # Settlements
-        for s in detail["settlements"]:
-            writer.writerow([
-                "Settlement",
-                f"{s['from_name']} → {s['to_name']}",
-                "",
-                f"{s['amount_paise']/100:.2f}",
-                s["from_name"],
-                "",
-                s["to_name"],
-                s["created_at"],
-                "Active",
-            ])
-
-        # Balances summary
-        writer.writerow([])
-        writer.writerow(["--- Balances ---"])
-        writer.writerow(["Member", "Net Balance (₹)"])
-        for b in detail["balances"]:
-            writer.writerow([b["name"], f"{b['net_paise']/100:.2f}"])
-
-        buf.seek(0)
-        filename = f"spliti-{group['name'].lower().replace(' ', '-')}-expenses.csv"
-        return StreamingResponse(
-            iter([buf.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    finally:
-        conn.close()
-
-
 @split_app.delete("/api/groups/{gid}", dependencies=[Depends(require_auth)])
-def delete_group(gid: int, background_tasks: BackgroundTasks) -> dict:
+def delete_group(gid: int) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
         conn.execute("DELETE FROM groups WHERE id = ?", (gid,))
         conn.commit()
-        background_tasks.add_task(firestore_sync.delete_group, gid)
         return {"deleted": gid}
     finally:
         conn.close()
 
 
 @split_app.post("/api/groups/{gid}/members", dependencies=[Depends(require_auth)])
-def add_member(gid: int, body: MemberCreate, background_tasks: BackgroundTasks) -> dict:
+def add_member(gid: int, body: MemberCreate) -> dict:
     conn = db.connect()
     try:
         _group_or_404(conn, gid)
@@ -655,7 +523,6 @@ def add_member(gid: int, body: MemberCreate, background_tasks: BackgroundTasks) 
             "INSERT INTO members (group_id, name) VALUES (?, ?)", (gid, name)
         )
         conn.commit()
-        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": cur.lastrowid, "name": name, "group_id": gid}
     finally:
         conn.close()
@@ -690,7 +557,6 @@ def add_expense(
             raise HTTPException(status_code=422, detail="payer is not in this group")
 
         total = to_paise(body.amount)
-        category = body.category if body.category in VALID_CATEGORIES else detect_category(body.description)
 
         if body.split_type == "equal":
             participants = body.members or sorted(valid)
@@ -713,9 +579,9 @@ def add_expense(
         try:
             cur = conn.execute(
                 "INSERT INTO expenses "
-                "(group_id, description, amount_paise, paid_by, added_by, client_id, category) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id, category),
+                "(group_id, description, amount_paise, paid_by, added_by, client_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (gid, body.description.strip(), total, body.paid_by, adder["id"], body.client_id),
             )
             eid = cur.lastrowid
             conn.executemany(
@@ -745,7 +611,6 @@ def add_expense(
                 notifications.dispatch, gid, "new_expense", adder["id"],
                 list(set(share_map) | {body.paid_by}), _net_by_member(detail), summary,
             )
-        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": eid}
     finally:
         conn.close()
@@ -771,9 +636,8 @@ def delete_expense(
             (eid,),
         )
         conn.commit()
-        if cur.rowcount:  # only notify/mirror on a real state change (not a replayed delete)
+        if cur.rowcount:  # only notify on a real state change (not a replayed delete)
             _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=False)
-            background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"deleted": eid}
     finally:
         conn.close()
@@ -799,7 +663,6 @@ def restore_expense(
         conn.commit()
         if cur.rowcount:
             _notify_expense_change(conn, background_tasks, gid, eid, row, user, restored=True)
-            background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"restored": eid}
     finally:
         conn.close()
@@ -871,7 +734,6 @@ def add_settlement(
                 actor["id"] if actor else None,
                 [body.from_member, body.to_member], _net_by_member(detail), summary,
             )
-        background_tasks.add_task(firestore_sync.mirror_group, gid)
         return {"id": cur.lastrowid}
     finally:
         conn.close()

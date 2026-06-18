@@ -22,20 +22,9 @@ class Settings(BaseSettings):
     # same way chat degrades without a Mistral key. Generate a pair with
     # `python scripts/gen_vapid.py`. The private key is a secret; the public
     # (application server) key is handed to the browser to subscribe.
-    # vapid_private_key may be the PEM text itself or a path to a .pem file — a
-    # path is safer, since a multi-line PEM in an env var is easily mangled.
     vapid_private_key: str = ""
     vapid_public_key: str = ""
     vapid_subject: str = "mailto:admin@example.com"
-
-    # Cloud Firestore mirror (optional). SQLite stays the source of truth; when
-    # firestore_project_id is set, each write is mirrored to Firestore in the
-    # background. Leave it empty to run on SQLite alone (the mirror no-ops).
-    # firestore_credentials is a path to a service-account JSON key; if omitted,
-    # the client uses Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS,
-    # gcloud login, or GCE/Cloud Run metadata).
-    firestore_project_id: str = ""
-    firestore_credentials: str = ""
 
 
 @lru_cache

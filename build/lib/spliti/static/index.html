@@ -1,0 +1,1842 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f1419" />
+<title>Spliti · Spiti trip expenses</title>
+<!-- PWA: installable on Android (manifest) and iOS (apple-touch-icon + standalone) -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Spliti" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a212b; --panel2: #222c39; --line: #2c3845;
+    --text: #e6edf3; --muted: #8b98a8; --accent: #2dd4a7; --accent2: #1f9d7c;
+    --red: #f7768e; --green: #2dd4a7; --chip: #2a3543;
+    --btn-text: #06281f; --overlay: rgba(0,0,0,0.55);
+    --header-bg: rgba(15,20,25,0.96); --header-bg2: rgba(15,20,25,0.82);
+    --nav-bg: rgba(26,33,43,0.92);
+    --hover-highlight: rgba(255,255,255,0.04); --code-bg: rgba(0,0,0,0.28);
+    --skel-mid: #2f3b4a; --pre-bg: #0f1419;
+    --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    --font-display: 'Fredoka', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  [data-theme="light"] {
+    --bg: #f0f2f5; --panel: #ffffff; --panel2: #e8ecf1; --line: #d1d9e0;
+    --text: #1a1a2e; --muted: #5a6370; --accent: #0d9373; --accent2: #0b7a60;
+    --red: #dc3545; --green: #0d9373; --chip: #dce3eb;
+    --btn-text: #ffffff; --overlay: rgba(0,0,0,0.35);
+    --header-bg: rgba(255,255,255,0.96); --header-bg2: rgba(255,255,255,0.82);
+    --nav-bg: rgba(255,255,255,0.92);
+    --hover-highlight: rgba(0,0,0,0.04); --code-bg: rgba(0,0,0,0.08);
+    --skel-mid: #cfd8e0; --pre-bg: #e8ecf1;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  /* Suppress the double-tap-to-zoom jump on taps without disabling pinch-zoom
+     (keeps it accessible — WCAG 1.4.4). */
+  button, .seg, .tabs, .bottomnav, .syncbtn, .theme-toggle { touch-action: manipulation; }
+  body { margin: 0; font: 16px/1.55 var(--font-body);
+    /* Fill the viewport so the fixed gradient always covers the screen. Without
+       this, a short tab (empty History/Balance) leaves the body shorter than the
+       viewport and iOS clips the fixed background, exposing a bare band below the
+       header. min-height:100dvh tracks the dynamic toolbar; 100vh is the fallback. */
+    min-height: 100vh; min-height: 100dvh;
+    display: flex; flex-direction: column;
+    background:
+      radial-gradient(1100px 460px at 100% -8%, rgba(45,212,167,0.10), transparent 60%),
+      radial-gradient(900px 420px at -10% 0%, rgba(122,162,247,0.08), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text); -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  a { color: var(--accent); }
+  /* tabular money so columns line up */
+  .amt, .stat-v, .exact, .split-sum { font-variant-numeric: tabular-nums; }
+
+  /* ---- theme toggle ---- */
+  .theme-toggle { margin-left: auto; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 50%; width: 36px; height: 36px; min-height: 0; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--muted); transition: color 0.2s ease, background 0.2s ease; flex: none; }
+  .theme-toggle:hover { color: var(--accent); background: var(--hover-highlight); }
+  .theme-toggle svg { width: 18px; height: 18px; }
+
+  /* the title column grows so the sync icon + toggle always sit at the right edge */
+  header > div { flex: 1 1 auto; min-width: 0; }
+  /* small sync-status icon (tap to force a sync) */
+  .syncbtn { flex: none; display: inline-flex; align-items: center; gap: 4px;
+    background: none; border: none; cursor: pointer; padding: 6px; min-height: 0;
+    border-radius: 999px; transition: color 0.2s ease, background 0.2s ease; }
+  .syncbtn .ic-svg { width: 19px; height: 19px; }
+  .syncbtn .cnt { font-size: 10px; font-weight: 700; line-height: 1;
+    background: var(--accent); color: var(--btn-text); border-radius: 999px; padding: 2px 5px; }
+  .syncbtn.ok { color: var(--green); }
+  .syncbtn.busy { color: var(--accent); }
+  .syncbtn.off { color: var(--muted); }
+  .syncbtn.off .cnt { background: var(--muted); color: #fff; }
+  .syncbtn .ic-svg.spin { animation: spin 0.9s linear infinite; transform-origin: 50% 50%; }
+
+  /* ---- header (mobile-first, sticky) ---- */
+  header { position: sticky; top: 0; z-index: 10; flex: none;
+    background: linear-gradient(180deg, var(--header-bg), var(--header-bg2));
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: calc(13px + env(safe-area-inset-top, 0px)) 16px 13px;
+    border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 11px; }
+  header .logo { line-height: 0; flex: none; color: var(--accent);
+    filter: drop-shadow(0 2px 6px rgba(45,212,167,0.35)); animation: logoBob 3.2s ease-in-out infinite; }
+  @keyframes logoBob { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
+  header h1 { margin: 0; font-family: var(--font-display); font-size: 23px; font-weight: 700;
+    letter-spacing: -0.3px; line-height: 1.05; }
+  header h1 .b { background: linear-gradient(90deg, var(--accent), #7aa2f7);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  header .sub { color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
+
+  /* ---- layout: single centered column ---- */
+  /* wrap/main grow to fill the viewport so short tabs don't leave a gap. */
+  .wrap { display: flex; flex-direction: column; flex: 1 0 auto; }
+  .main { flex: 1 0 auto; padding: 16px; padding-bottom: calc(86px + var(--safe-b)); }
+
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted);
+    margin: 0 0 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; margin-bottom: 14px; }
+
+  /* ---- form controls: big touch targets, 16px to avoid iOS zoom ---- */
+  input, select, button { font: inherit; }
+  input, select { background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 12px 13px; width: 100%; font-size: 16px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  input.suggested { color: var(--muted); font-style: italic; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px; }
+  button { background: var(--accent); color: var(--btn-text); border: none; border-radius: 10px;
+    padding: 12px 16px; font-weight: 600; cursor: pointer; min-height: 46px; }
+  button:active { transform: scale(0.98); }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  button.sm { padding: 8px 12px; min-height: 38px; font-size: 14px; }
+  /* compact pill — for secondary actions sitting next to a small heading */
+  button.pill-btn { min-height: 0; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    border-radius: 999px; }
+
+  .addrow { display: flex; gap: 8px; }
+  .addrow input { flex: 1; }
+  .addrow button { flex: none; }
+
+  /* expense fields: stacked on mobile, inline on >=640px */
+  .fields { display: grid; gap: 12px; grid-template-columns: 1fr; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { flex: 1; background: var(--panel2); color: var(--muted); border-radius: 0;
+    font-weight: 500; min-height: 44px; }
+  .seg button.on { background: var(--accent); color: var(--btn-text); }
+  #addExpense { width: 100%; margin-top: 4px; }
+
+  /* groups: horizontal scroll pills on mobile, vertical list on desktop */
+  .glist { list-style: none; margin: 0; padding: 2px 0 6px; display: flex; gap: 8px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .glist li { flex: 0 0 auto; white-space: nowrap; padding: 10px 14px; border-radius: 999px;
+    cursor: pointer; background: var(--panel2); border: 1px solid var(--line);
+    display: flex; gap: 8px; align-items: center; }
+  .glist li.active { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
+  .glist li.active .count { color: var(--btn-text); }
+  .glist .count { color: var(--muted); font-size: 12px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 20px;
+    padding: 6px 13px; font-size: 14px; }
+
+  .bal, .sug, .exp { display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .bal:last-child, .sug:last-child, .exp:last-child { border: none; }
+  .pos { color: var(--green); font-weight: 600; } .neg { color: var(--red); font-weight: 600; }
+  .zero { color: var(--muted); }
+  .hint-line { color: var(--muted); font-size: 13px; margin: -2px 0 10px; }
+  .sug .who { display: flex; align-items: center; gap: 8px; }
+  .sug .arrow { color: var(--accent); font-weight: 700; }
+  .sug .amt { font-weight: 600; white-space: nowrap; }
+  .exp .meta { color: var(--muted); font-size: 13px; }
+  .exp .amt { font-weight: 600; white-space: nowrap; }
+  .exp.deleted { opacity: 0.55; }
+  .exp.deleted .exp-desc, .exp.deleted .amt { text-decoration: line-through; }
+  .exp.clickable { cursor: pointer; }
+  .exp.clickable:hover { background: var(--hover-highlight); border-radius: 8px; }
+  /* paid-by vs added-by, shown in the expense detail (by the split chart) */
+  .who-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+  .who-pill { display: flex; align-items: center; gap: 7px; flex: 1 1 0; min-width: 0;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 8px 11px; font-size: 14px; }
+  .who-pill .who-lbl { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; display: block; line-height: 1.3; }
+  .who-pill b { font-weight: 600; }
+  .split-chart { display: flex; justify-content: center; margin: 6px 0 14px; min-height: 40px; }
+  .split-chart svg { max-width: 100%; height: auto; }
+  .split-list { margin-bottom: 16px; }
+  .muted { color: var(--muted); }
+  .splitrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .splitrow input[type=checkbox] { width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+  .splitrow span { flex: 1; }
+  .splitrow input.exact { width: 110px; flex: none; }
+  .split-sum { font-size: 13px; margin-top: 10px; color: var(--muted); }
+  .split-sum.ok { color: var(--green); }
+  .split-sum.bad { color: var(--red); }
+  .err { color: var(--red); font-size: 13px; min-height: 18px; }
+  .empty { color: var(--muted); padding: 40px 16px; text-align: center; }
+
+  /* ---- expense chat ---- */
+  .chatlog { display: flex; flex-direction: column; gap: 8px; max-height: 320px;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .msg { padding: 10px 13px; border-radius: 14px; max-width: 88%; white-space: pre-wrap;
+    word-wrap: break-word; line-height: 1.45; font-size: 15px; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: var(--btn-text);
+    border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--panel2); border: 1px solid var(--line);
+    border-bottom-left-radius: 4px; white-space: normal; }
+  .msg.bot p { margin: 0 0 8px; } .msg.bot p:last-child { margin: 0; }
+  .msg.bot ul, .msg.bot ol { margin: 4px 0 8px; padding-left: 20px; }
+  .msg.bot li { margin: 2px 0; }
+  .msg.bot .md-h { display: block; font-weight: 700; margin: 6px 0 4px; }
+  .msg.bot code { background: var(--code-bg); padding: 1px 5px; border-radius: 5px;
+    font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .msg.bot pre { background: var(--pre-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; overflow-x: auto; margin: 6px 0; }
+  .msg.bot pre code { background: none; padding: 0; }
+  .msg.hint { align-self: center; background: none; color: var(--muted); font-size: 13px;
+    text-align: center; }
+  .chat-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+  .chat-suggest button { background: var(--chip); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 12px; min-height: 0; font-size: 13px; font-weight: 500; }
+  .grouphead { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    margin-bottom: 10px; }
+  .grouphead h1 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+
+  /* ---- tabs ---- */
+  .chips.members { margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 0 0 auto; background: none; border: none; color: var(--muted);
+    border-radius: 0; min-height: 44px; padding: 10px 14px; font-weight: 600;
+    white-space: nowrap; border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .overview { line-height: 1.55; }
+  .overview p { margin: 0 0 8px; } .overview p:last-child { margin: 0; }
+  .overview strong { font-weight: 700; color: var(--text); }
+  .overview ul, .overview ol { margin: 4px 0 8px; padding-left: 20px; }
+  .stats { display: flex; justify-content: space-around; text-align: center; gap: 10px; }
+  .stat { flex: 1; min-width: 0; }
+  .stat + .stat { border-left: 1px solid var(--line); }
+  .stat-v { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -0.5px;
+    background: linear-gradient(90deg, var(--accent), #7aa2f7);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    overflow: hidden; text-overflow: ellipsis; }
+  .stat-v.name { font-size: 18px; }
+  .stat-sub { font-size: 12px; color: var(--muted); }
+  .stat-l { font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.6px; margin-top: 4px; }
+  .overview-head { display: flex; justify-content: space-between; align-items: center; }
+  .overview-head h2 { margin: 0; }
+
+  /* ---- crew strip (shows off the funny member icons) ---- */
+  .crew { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding: 2px 0; margin: 0 -2px; }
+  .crew-m { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
+    gap: 6px; width: 68px; padding: 6px 2px; background: none; border: none; cursor: pointer;
+    border-radius: 12px; min-height: 0; transition: background 0.15s ease, transform 0.1s ease; }
+  .crew-m:hover { background: var(--hover-highlight); }
+  .crew-m:active { transform: scale(0.95); }
+  .crew-m .name { font-size: 12px; color: var(--muted); font-weight: 600; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crew-m .av { animation: pop 0.35s ease both; }
+
+  /* ---- animations ---- */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+  #tabbody > .card { animation: fadeUp 0.3s ease both; }
+  #tabbody > .card:nth-child(2) { animation-delay: 0.06s; }
+  #tabbody > .card:nth-child(3) { animation-delay: 0.12s; }
+  .splitrow { animation: fadeUp 0.25s ease both; }
+  .tabs button, .chip, .bal, .sug { transition: color 0.15s ease, border-color 0.15s ease, transform 0.1s ease; }
+  .seg button { transition: background 0.18s ease, color 0.18s ease; }
+  .exp { transition: opacity 0.2s ease; }
+
+  /* ---- confirm modal ---- */
+  .modal-ov { position: fixed; inset: 0; background: var(--overlay); display: flex;
+    align-items: center; justify-content: center; padding: 20px; z-index: 100;
+    opacity: 0; transition: opacity 0.18s ease; }
+  .modal-ov.show { opacity: 1; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px; max-width: 360px; width: 100%; max-height: 86vh; overflow-y: auto;
+    transform: translateY(14px) scale(0.97);
+    transition: transform 0.2s cubic-bezier(.2,.8,.2,1); }
+  .modal-ov.show .modal { transform: none; }
+  .modal-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .modal-msg { color: var(--muted); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  button.danger { background: var(--red); color: var(--btn-text); }
+  /* notification settings rows */
+  .notif-row { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line);
+    color: var(--text); font-size: 14px; text-align: left; }
+  .notif-row:last-child { border-bottom: none; }
+  .notif-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+  .notif-cats.dim { opacity: 0.45; pointer-events: none; }
+  .notif-lead { font-weight: 600; }
+  button.danger:hover { background: #e0566f; color: #fff; }
+  .modal.success { text-align: center; }
+  .modal.success .modal-title { font-size: 19px; margin-bottom: 16px; }
+  .modal.success .modal-actions { justify-content: center; }
+  .modal.success .thumb { font-size: 60px; line-height: 1; margin-bottom: 10px;
+    animation: thumbPop 0.6s cubic-bezier(.2,.9,.3,1.5) both, thumbBob 1.6s ease-in-out 0.6s infinite; }
+  @keyframes thumbPop { 0% { transform: scale(0) rotate(-35deg); opacity: 0; }
+    60% { transform: scale(1.25) rotate(10deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0); } }
+  @keyframes thumbBob { 0%,100% { transform: translateY(0) rotate(0); }
+    50% { transform: translateY(-6px) rotate(-6deg); } }
+
+  /* ---- toast ---- */
+  .toast { position: fixed; left: 50%; bottom: calc(22px + var(--safe-b));
+    transform: translateX(-50%) translateY(20px); background: var(--accent); color: var(--btn-text);
+    padding: 11px 20px; border-radius: 999px; font-weight: 600; z-index: 120; opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+
+  /* ---- avatars (funny emoji per member) ---- */
+  .av { display: inline-flex; align-items: center; justify-content: center; width: 32px;
+    height: 32px; aspect-ratio: 1 / 1; border-radius: 50%; flex: 0 0 auto; line-height: 1;
+    user-select: none; overflow: hidden; transition: transform 0.15s ease; }
+  .av:hover { transform: scale(1.12) rotate(-6deg); }
+  .splitrow .av { flex: 0 0 auto; }
+
+  /* ---- bottom navigation ---- */
+  .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex;
+    background: var(--nav-bg); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line); padding-bottom: var(--safe-b); }
+  .bottomnav button { flex: 1; background: none; border: none; border-radius: 0;
+    min-height: 60px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 3px; color: var(--muted); padding: 8px 4px;
+    transition: color 0.15s ease, transform 0.1s ease; }
+  .bottomnav button.on { color: var(--accent); }
+  .bottomnav button.on .ic { transform: translateY(-1px) scale(1.08); }
+  .bottomnav .ic { line-height: 0; transition: transform 0.18s ease; }
+  .ic-svg { display: inline-block; vertical-align: -0.15em; }
+  .bottomnav .ic .ic-svg { width: 23px; height: 23px; vertical-align: middle; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .icon-btn .ic-svg { vertical-align: middle; }
+  .loc-chip .ic-svg { vertical-align: -0.18em; }
+  .loc-chip.loading { color: var(--muted); background: var(--hover-highlight); border-color: var(--line); }
+  .loc-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line);
+    border-top-color: var(--accent); display: inline-block; vertical-align: -2px;
+    animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bottomnav .lb { font-size: 11px; font-weight: 600; }
+
+  /* ---- floating add button (FAB) ---- */
+  .fab { position: fixed; left: 18px; bottom: calc(82px + var(--safe-b)); z-index: 55;
+    width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+    background: linear-gradient(135deg, var(--accent), #1fb98a); color: var(--btn-text);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 26px rgba(45,212,167,0.45), 0 2px 6px rgba(0,0,0,0.4);
+    transition: transform 0.18s cubic-bezier(.2,.9,.3,1.4), box-shadow 0.18s ease;
+    animation: fabIn 0.4s cubic-bezier(.2,.9,.3,1.5) both; }
+  .fab .plus { display: block; transition: transform 0.25s cubic-bezier(.2,.9,.3,1.4); }
+  .fab:hover { transform: scale(1.07); box-shadow: 0 14px 32px rgba(45,212,167,0.55); }
+  .fab:active { transform: scale(0.94); }
+  .fab:active .plus { transform: rotate(90deg); }
+  @keyframes fabIn { from { opacity: 0; transform: scale(0) translateY(20px); } to { opacity: 1; transform: none; } }
+
+  /* expense form inside a modal: roomier than the confirm modals */
+  .modal.expense-modal { max-width: 440px; }
+  .modal.expense-modal .modal-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  /* stats inside the narrow member modal: smaller so money never overflows */
+  .modal .stats { gap: 6px; }
+  .modal .stats .stat-v { font-size: 17px; letter-spacing: -0.3px; }
+  .modal .stats .stat-l { font-size: 10px; }
+
+  .loc-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600;
+    color: var(--accent); background: rgba(45,212,167,0.10); border: 1px solid rgba(45,212,167,0.28);
+    border-radius: 999px; padding: 3px 10px; margin-bottom: 14px; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    animation: pop 0.3s ease both; }
+
+  /* ---- skeleton loading ---- */
+  .skel { height: 13px; border-radius: 6px; margin: 9px 0;
+    background: linear-gradient(90deg, var(--panel2) 25%, var(--skel-mid) 37%, var(--panel2) 63%);
+    background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+  .skel.short { width: 55%; }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+  /* ---- history rows ---- */
+  .date-head { font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.7px; margin: 16px 0 4px; font-weight: 700; }
+  .date-head:first-child { margin-top: 0; }
+  .exp-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .exp-main > div { min-width: 0; }
+  .exp-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .exp-right { display: flex; align-items: center; gap: 10px; flex: none; }
+
+  /* ---- balance rows with bars ---- */
+  .balrow { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .balrow:last-child { border: none; }
+  .balrow-top { display: flex; align-items: center; gap: 10px; }
+  .balname { flex: 1; font-weight: 500; }
+  .bar { height: 6px; background: var(--panel2); border-radius: 99px; margin-top: 9px;
+    margin-left: 42px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 99px; width: 0; transition: width 0.5s cubic-bezier(.2,.8,.2,1); }
+  .bar-fill.pos { background: var(--green); } .bar-fill.neg { background: var(--red); }
+  .sug .who { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+  /* ---- amount field with ₹ prefix ---- */
+  .amount-field { position: relative; }
+  .amount-field .cur { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); pointer-events: none; }
+  .amount-field input { padding-left: 26px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (min-width: 768px) {
+    header { padding: 18px 24px; }
+    header h1 { font-size: 22px; } header .sub { font-size: 13px; }
+    .main { padding: 24px; padding-bottom: 110px; max-width: 720px; margin: 0 auto; }
+    #addExpense { width: auto; }
+    .bottomnav { left: 50%; right: auto; transform: translateX(-50%); bottom: 18px;
+      border: 1px solid var(--line); border-radius: 18px; max-width: 520px; width: auto;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45); overflow: hidden; }
+    .bottomnav button { min-width: 104px; }
+  }
+  @media (min-width: 640px) {
+    .exp-fields { grid-template-columns: 1fr 120px 160px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo"><svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20 9.5 6l4 8 2.2-3.5L21 20Z"/><path d="m7.4 13.2 2.1 1.6 2-1.4"/></svg></span>
+  <div>
+    <h1><span class="b">Spliti</span></h1>
+    <span class="sub">Spiti trip · split expenses</span>
+  </div>
+  <button class="syncbtn" id="netBadge" type="button" aria-live="polite" title="Sync status"></button>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark mode" title="Toggle theme">
+    <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+  </button>
+  <button class="theme-toggle" id="settingsBtn" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+  </button>
+</header>
+<div class="wrap">
+  <main class="main" id="main">
+    <div class="empty">Loading…</div>
+  </main>
+</div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const fmt = c => (c<0?'-':'') + '₹' + (Math.abs(c)/100).toFixed(2);
+
+// ---- theme toggle (dark / light) ----
+const THEME_ICONS = {
+  dark: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  light: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+};
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f0f2f5' : '#0f1419';
+  $('#themeIcon').innerHTML = THEME_ICONS[theme];
+  localStorage.setItem('spliti-theme', theme);
+}
+(function initTheme() {
+  const saved = localStorage.getItem('spliti-theme');
+  applyTheme(saved || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
+
+// ---- crisp inline SVG icons (FontAwesome/Lucide style, inherit currentColor) ----
+const ICON_PATHS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h3.5v-5.5h5V21H18a1 1 0 0 0 1-1V9.5"/>',
+  history: '<path d="M6 3h12a1 1 0 0 1 1 1v17l-3.2-2-3.4 2-3.4-2L5 21V4a1 1 0 0 1 1-1Z"/><path d="M9 8h6"/><path d="M9 12h5"/>',
+  balance: '<path d="M12 3v18"/><path d="M7 21h10"/><path d="M5.5 7h13"/><path d="M5.5 7 2.5 13.5a3 3 0 0 0 6 0L5.5 7Z"/><path d="M18.5 7l-3 6.5a3 3 0 0 0 6 0L18.5 7Z"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3.5V9h-5.5"/>',
+  close: '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  pin: '<path d="M12 21s-6.5-5.3-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.7 12 21 12 21Z"/><circle cx="12" cy="10.5" r="2.4"/>',
+  // sync-status icons
+  cloudcheck: '<path d="M7 18h10a3.5 3.5 0 0 0 .5-6.97A5 5 0 0 0 8.6 9.2 4 4 0 0 0 7 18Z"/><path d="m9.5 13.5 1.8 1.8 3.2-3.2"/>',
+  cloudoff: '<path d="M3 3l18 18"/><path d="M8.6 9.2A5 5 0 0 1 16.9 11.1 3.5 3.5 0 0 1 18.8 17M15.5 18H7a4 4 0 0 1-1.3-7.8"/>',
+};
+function icon(name, size=24) {
+  return `<svg class="ic-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" `
+    + `stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" `
+    + `aria-hidden="true">${ICON_PATHS[name]||''}</svg>`;
+}
+// SQLite stores UTC ("YYYY-MM-DD HH:MM:SS"); show it in IST.
+const fmtDate = s => {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  return isNaN(d) ? s : d.toLocaleString('en-IN',
+    { timeZone:'Asia/Kolkata', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', hour12:true });
+};
+// IST calendar-date key (YYYY-MM-DD) for grouping, and a short label from that key.
+const istDateKey = s => {
+  const d = new Date((s||'').replace(' ', 'T') + 'Z');
+  return isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+};
+const labelFromKey = k => {
+  if (!k) return '—';
+  const [y, m, dd] = k.split('-').map(Number);
+  return new Date(y, m - 1, dd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+};
+const fmtTime = s => {
+  const d = new Date((s || '').replace(' ', 'T') + 'Z');
+  return isNaN(d) ? '' : d.toLocaleTimeString('en-IN',
+    { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+};
+const relDate = k => {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const yest = new Date(Date.now() - 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  return k === today ? 'Today' : k === yest ? 'Yesterday' : labelFromKey(k);
+};
+
+// ---- funny member avatars: deterministic emoji + color per name ----
+const AV_COLORS = ['#f7768e','#e0af68','#9ece6a','#2ac3de','#7aa2f7','#bb9af7','#ff9e64','#73daca'];
+const AV_EMOJI = ['🦊','🐼','🐧','🦁','🐸','🐵','🐙','🦄','🐶','🐯','🐨','🐮','🐷','🦝','🦘','🦔',
+  '🐲','🦖','🐢','🦦','🐹','🐰','🐺','🦅','🦩','🐙','🦥','🐝','🦉','🐳'];
+// FNV-ish hash so the same name always lands on the same emoji + colour
+function nameHash(name) {
+  let h = 0; for (let i = 0; i < (name||'').length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h;
+}
+function avColor(name) { return AV_COLORS[nameHash(name) % AV_COLORS.length]; }
+function avEmoji(name) {
+  // bias by a second hash so two names sharing a colour rarely share an emoji too
+  const h = nameHash(name), h2 = (h ^ (h >>> 13)) >>> 0;
+  return AV_EMOJI[h2 % AV_EMOJI.length];
+}
+function avatar(name, size) {
+  const c = avColor(name || ''), sz = size || 28;
+  return `<span class="av" title="${esc(name||'')}" style="width:${sz}px;height:${sz}px;`
+    + `font-size:${Math.round(sz * 0.62)}px;background:${c}22;`
+    + `box-shadow:inset 0 0 0 1.5px ${c}66, 0 1px 4px ${c}1f">${avEmoji(name)}</span>`;
+}
+let state = { groups: [], current: null, detail: null, chats: {}, overview: {} };
+
+// ---- auth: send Basic credentials explicitly on every request. ----
+// iOS home-screen PWAs don't share Safari's HTTP Basic Auth cache and don't
+// reattach it to fetch/XHR, so we capture the login once and set the header
+// ourselves (works the same everywhere). Token = base64("user:pass").
+const AUTH_KEY = 'spliti_auth';
+const ME_KEY = 'spliti_me';
+let authToken = localStorage.getItem(AUTH_KEY) || null;
+// Who is signed in: { member_id, name } — set once the name is verified as a
+// group member. Used to record who adds an expense and to default "Paid by".
+let me = (() => { try { return JSON.parse(localStorage.getItem(ME_KEY)) || null; } catch (_) { return null; } })();
+let loginInFlight = null;
+
+function authHeaders(h) {
+  h = h || {};
+  if (authToken) h['Authorization'] = 'Basic ' + authToken;
+  return h;
+}
+
+function clearAuth() {
+  authToken = null; me = null;
+  localStorage.removeItem(AUTH_KEY); localStorage.removeItem(ME_KEY);
+}
+
+// Show the login overlay and resolve once a valid *member* is signed in.
+// Validates name + password against /api/me, so non-members are rejected here.
+// Concurrent 401s share a single prompt via loginInFlight.
+function requestLogin(msg) {
+  if (loginInFlight) return loginInFlight;
+  loginInFlight = new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-ov';
+    ov.innerHTML = `<div class="modal">
+      <div class="modal-title">Sign in to Spliti</div>
+      <div class="modal-msg">${msg || 'Enter your name and the trip password.'}</div>
+      <input id="lg-user" type="text" placeholder="Your name" autocomplete="username" style="width:100%;margin-bottom:10px" />
+      <input id="lg-pass" type="password" placeholder="Trip password" autocomplete="current-password" style="width:100%;margin-bottom:8px" />
+      <div class="modal-msg" id="lg-err" style="color:var(--red);display:none;margin-bottom:10px"></div>
+      <div class="modal-actions"><button data-act="go">Sign in</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add('show'));
+    const user = ov.querySelector('#lg-user');
+    const pass = ov.querySelector('#lg-pass');
+    const err = ov.querySelector('#lg-err');
+    if (me && me.name) user.value = me.name;
+    setTimeout(() => (user.value ? pass : user).focus(), 60);
+    const showErr = (t) => { err.textContent = t; err.style.display = 'block'; };
+    const submit = async () => {
+      const u = user.value.trim();
+      const p = pass.value;
+      if (!u) { showErr('Enter your name.'); user.focus(); return; }
+      if (!p) { pass.focus(); return; }
+      // base64 of "name:password", unicode-safe.
+      const token = btoa(unescape(encodeURIComponent(u + ':' + p)));
+      let r;
+      try { r = await fetch('/api/me', { headers: { Authorization: 'Basic ' + token } }); }
+      catch (_) {
+        // Offline: don't block sign-in. If we have cached data and the name matches
+        // a known member, let them in optimistically; the credentials get validated
+        // on the next online request (a wrong password will re-prompt then).
+        const g = lastGid(), snap = g ? loadSnapshot(g) : null;
+        const mem = snap && snap.members.find(m => (m.name || '').toLowerCase() === u.toLowerCase());
+        if (mem) {
+          authToken = token;
+          me = { member_id: mem.id, name: mem.name, group_id: snap.group.id };
+          localStorage.setItem(AUTH_KEY, token);
+          localStorage.setItem(ME_KEY, JSON.stringify(me));
+          ov.classList.remove('show'); setTimeout(() => ov.remove(), 200);
+          loginInFlight = null; resolve(true);
+          return;
+        }
+        showErr('You’re offline — connect once to sign in the first time.');
+        return;
+      }
+      if (r.status === 401) { showErr('Wrong password — try again.'); pass.value = ''; pass.focus(); return; }
+      if (r.status === 403) {
+        const t = await r.json().catch(() => ({}));
+        showErr(t.detail || 'That name isn’t in the group.'); user.focus();
+        return;
+      }
+      if (!r.ok) { showErr('Couldn’t sign in — try again.'); return; }
+      authToken = token;
+      me = await r.json();
+      localStorage.setItem(AUTH_KEY, token);
+      localStorage.setItem(ME_KEY, JSON.stringify(me));
+      ov.classList.remove('show');
+      setTimeout(() => ov.remove(), 200);
+      loginInFlight = null;
+      resolve(true);
+    };
+    ov.querySelector('[data-act=go]').onclick = submit;
+    [user, pass].forEach(el => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); }));
+  });
+  return loginInFlight;
+}
+
+// Guarantee a signed-in member before loading data. Validates any stored token
+// (it may predate member checks, or the name may have been removed).
+async function ensureAuth() {
+  if (authToken) {
+    try {
+      const r = await fetch('/api/me', { headers: authHeaders({}) });
+      if (r.ok) { me = await r.json(); localStorage.setItem(ME_KEY, JSON.stringify(me)); return; }
+    } catch (_) { return; }  // offline: keep going with the cached shell
+    clearAuth();
+  }
+  await requestLogin();
+}
+
+// fetch wrapper: attach auth, and on 401 prompt for login then retry once.
+async function fetchAuthed(url, opt) {
+  opt = opt || {};
+  opt.headers = authHeaders(opt.headers || {});
+  let r = await fetch(url, opt);
+  if (r.status === 401) {
+    clearAuth();
+    await requestLogin();
+    opt.headers = authHeaders(opt.headers);
+    r = await fetch(url, opt);
+  }
+  return r;
+}
+
+async function api(method, path, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  const r = await fetchAuthed('/api' + path, opt);
+  if (!r.ok) { const t = await r.json().catch(()=>({detail:r.statusText})); throw new Error(t.detail||'error'); }
+  return r.json();
+}
+
+// ============================================================================
+//  Offline support — read from a local snapshot, queue writes, sync on reconnect
+// ============================================================================
+// The app stays fully usable with no network: the last server state is cached in
+// localStorage and rendered instantly, writes are applied optimistically and
+// parked in an "outbox", then replayed once the connection returns. Each queued
+// write carries a client_id so the replay is idempotent server-side (exactly-once
+// effect). Balances are recomputed locally — a JS mirror of spliti/balances.py —
+// so offline edits reflect immediately.
+
+const SNAP_PREFIX = 'spliti_snap_';
+const LAST_GID_KEY = 'spliti_last_gid';
+const OUTBOX_KEY = 'spliti_outbox';
+
+const uuid = () => (crypto.randomUUID
+  ? crypto.randomUUID()
+  : 'c-' + Date.now().toString(36) + '-' + Math.random().toString(16).slice(2));
+
+const readOutbox = () => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch (_) { return []; } };
+let outbox = readOutbox();
+const pendingCount = () => outbox.length;
+function saveOutbox() {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox)); } catch (_) {}
+  updateNetBadge();
+}
+// Another instance (a second tab / browser sharing this device) changed the queue:
+// adopt it so we don't overwrite each other's pending writes. Skipped mid-flush to
+// avoid yanking the op we're currently sending.
+window.addEventListener('storage', e => {
+  if (e.key === OUTBOX_KEY && !flushing) { outbox = readOutbox(); updateNetBadge(); }
+});
+
+const snapKey = gid => SNAP_PREFIX + gid;
+function saveSnapshot() {
+  if (!state.detail || !state.current) return;
+  try {
+    localStorage.setItem(snapKey(state.current), JSON.stringify(state.detail));
+    localStorage.setItem(LAST_GID_KEY, String(state.current));
+  } catch (_) {}
+}
+function loadSnapshot(gid) { try { return JSON.parse(localStorage.getItem(snapKey(gid))); } catch (_) { return null; } }
+const lastGid = () => { const v = localStorage.getItem(LAST_GID_KEY); return v ? +v : null; };
+
+// ---- local balance math (mirror of balances.py) ----
+function splitEqually(amountPaise, ids) {
+  const n = ids.length, base = Math.floor(amountPaise / n), rem = amountPaise - base * n;
+  const out = {}; ids.forEach((id, i) => { out[id] = base + (i < rem ? 1 : 0); });
+  return out;
+}
+function suggestSettlements(bal) {
+  const creditors = Object.entries(bal).map(([m, b]) => [+m, b]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const debtors = Object.entries(bal).map(([m, b]) => [+m, -b]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const out = []; let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const pay = Math.min(debtors[i][1], creditors[j][1]);
+    out.push({ from: debtors[i][0], to: creditors[j][0], amount_paise: pay });
+    debtors[i][1] -= pay; creditors[j][1] -= pay;
+    if (debtors[i][1] === 0) i++;
+    if (creditors[j][1] === 0) j++;
+  }
+  return out;
+}
+function recomputeDetail(d) {
+  const memberIds = d.members.map(m => m.id);
+  const nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  const bal = {}; memberIds.forEach(m => { bal[m] = 0; });
+  d.expenses.filter(e => !e.deleted).forEach(e => {
+    if (e.paid_by in bal) bal[e.paid_by] += e.amount_paise;
+    (e.shares || []).forEach(s => { if (s.member_id in bal) bal[s.member_id] -= s.share_paise; });
+  });
+  d.settlements.forEach(st => {
+    if (st.from_member in bal) bal[st.from_member] += st.amount_paise;
+    if (st.to_member in bal) bal[st.to_member] -= st.amount_paise;
+  });
+  d.balances = memberIds.map(m => ({ member_id: m, name: nameOf[m], net_paise: bal[m] }));
+  d.suggestions = suggestSettlements(bal).map(s => ({ ...s, from_name: nameOf[s.from], to_name: nameOf[s.to] }));
+}
+
+const nowUtc = () => new Date().toISOString().slice(0, 19).replace('T', ' ');  // SQLite-style UTC
+
+// A cheap fingerprint of the data we render, so a periodic background pull only
+// re-renders (and disrupts the open tab) when something actually changed — e.g.
+// another member added an expense.
+function detailSig(d) {
+  if (!d) return '';
+  return JSON.stringify({
+    e: d.expenses.map(x => [x.id, x.amount_paise, x.deleted ? 1 : 0]),
+    s: d.settlements.map(x => [x.id, x.amount_paise]),
+    m: d.members.map(x => [x.id, x.name]),
+  });
+}
+
+// ---- optimistic local mutations (until the server confirms) ----
+function localAddExpense(d, op) {
+  const b = op.body, nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  const amountPaise = Math.round(b.amount * 100);
+  let shareMap;
+  if (b.split_type === 'exact') { shareMap = {}; for (const [m, a] of Object.entries(b.shares)) shareMap[+m] = Math.round(a * 100); }
+  else { shareMap = splitEqually(amountPaise, b.members || d.members.map(m => m.id)); }
+  d.expenses.unshift({
+    id: op.client_id, client_id: op.client_id, description: b.description, amount_paise: amountPaise,
+    paid_by: b.paid_by, paid_by_name: nameOf[b.paid_by],
+    added_by: (me && me.member_id) || null, added_by_name: (me && me.name) || null,
+    created_at: nowUtc(), deleted: false, deleted_at: null, pending: true,
+    shares: Object.entries(shareMap).map(([m, c]) => ({ member_id: +m, name: nameOf[+m], share_paise: c })),
+  });
+  recomputeDetail(d);
+}
+function localAddSettlement(d, op) {
+  const b = op.body, nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  d.settlements.unshift({
+    id: op.client_id, client_id: op.client_id, from_member: b.from_member, to_member: b.to_member,
+    from_name: nameOf[b.from_member], to_name: nameOf[b.to_member],
+    amount_paise: Math.round(b.amount * 100), created_at: nowUtc(), pending: true,
+  });
+  recomputeDetail(d);
+}
+function localSetDeleted(d, eid, deleted) {
+  const e = d.expenses.find(x => String(x.id) === String(eid));
+  if (e) { e.deleted = deleted; e.deleted_at = deleted ? nowUtc() : null; recomputeDetail(d); }
+}
+
+// Queue a write: apply locally, persist, re-render, then try to push it.
+function queueMutation(op, applyFn) {
+  op.client_id = op.client_id || uuid();
+  if (op.body) op.body.client_id = op.client_id;   // server-side dedup key
+  applyFn(state.detail, op);
+  saveSnapshot();
+  // Re-read first so a write queued by another instance isn't clobbered when we
+  // persist (the in-memory copy may be stale). Not done mid-flush.
+  if (!flushing) outbox = readOutbox();
+  outbox.push(op); saveOutbox();
+  renderMain();
+  flush();
+}
+
+// ---- sync engine ----
+function specForOp(op) {
+  if (op.kind === 'expense') return ['POST', '/groups/' + op.gid + '/expenses', op.body];
+  if (op.kind === 'settlement') return ['POST', '/groups/' + op.gid + '/settlements', op.body];
+  if (op.kind === 'delete') return ['DELETE', '/groups/' + op.gid + '/expenses/' + op.eid, undefined];
+  if (op.kind === 'restore') return ['POST', '/groups/' + op.gid + '/expenses/' + op.eid + '/restore', undefined];
+  return null;
+}
+async function sendOp(op) {
+  const spec = specForOp(op); if (!spec) return;
+  const [method, path, body] = spec;
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  let r;
+  try { r = await fetchAuthed('/api' + path, opt); }
+  catch (_) { const e = new Error('offline'); e.retriable = true; throw e; }   // network down — retry later
+  if (r.ok || r.status === 404) return;  // 404 = row already gone; treat as applied
+  const t = await r.json().catch(() => ({}));
+  const e = new Error(t.detail || ('HTTP ' + r.status));
+  // 5xx / server failure is transient: keep the write queued and retry — never drop it.
+  // Only a genuine client rejection (4xx) is permanent and safe to discard.
+  e.retriable = r.status >= 500;
+  throw e;
+}
+
+let flushing = false;
+async function flush() {
+  // Only the overlap guard blocks here — we deliberately don't gate on
+  // navigator.onLine. It's unreliable (can stay false after a real reconnect,
+  // and the 'online' event doesn't always fire), so we just attempt the network
+  // and let a failure mean "still offline". This is what makes a reconnect
+  // actually pull fresh data.
+  if (flushing) { updateNetBadge(); return; }
+  flushing = true;
+  updateNetBadge();
+  try {
+    while (outbox.length) {
+      const op = outbox[0];
+      try { await sendOp(op); }
+      catch (e) {
+        // Transient (offline / 5xx): stop and keep the whole queue intact so no
+        // write is ever lost — we retry on the next tick, focus, or online event.
+        if (e.retriable) break;
+        // Permanent client rejection (4xx): drop just this op so it can't wedge
+        // the queue forever; the rest still sync.
+        console.warn('[sync] dropping rejected write', op, e.message);
+        toast('A queued change was rejected: ' + e.message);
+      }
+      outbox.shift(); saveOutbox();
+    }
+    // Caught up: pull canonical server state (real ids, timestamps, and anything
+    // other members added). Attempt regardless of navigator.onLine; a network
+    // failure just means we're still offline and we keep the cached state. Only
+    // re-render when it actually changed, so the background pull doesn't disrupt
+    // the open tab.
+    if (!outbox.length && state.current) {
+      try {
+        const fresh = await api('GET', '/current');
+        const changed = detailSig(fresh) !== detailSig(state.detail);
+        state.detail = fresh; state.current = fresh.group.id;
+        saveSnapshot();
+        if (changed) { delete state.overview[state.current]; renderMain(); }
+      } catch (_) { /* still offline — keep showing cached/optimistic state */ }
+    }
+  } finally { flushing = false; updateNetBadge(); }
+}
+
+// ---- sync-status icon in the header ----
+// ok = everything synced · busy = syncing/queued (online) · off = offline (changes
+// are saved locally and will sync when the connection returns).
+function updateNetBadge() {
+  const el = $('#netBadge'); if (!el) return;
+  const off = !navigator.onLine, pend = pendingCount();
+  let cls, ic, spin = false, title;
+  if (off) {
+    cls = 'off'; ic = 'cloudoff';
+    title = pend ? `Offline — ${pend} change${pend > 1 ? 's' : ''} saved on this device` : 'Offline — showing saved data';
+  } else if (pend || flushing) {
+    cls = 'busy'; ic = 'refresh'; spin = true;
+    title = pend ? `Syncing ${pend} change${pend > 1 ? 's' : ''}…` : 'Syncing…';
+  } else {
+    cls = 'ok'; ic = 'cloudcheck'; title = 'All changes synced';
+  }
+  el.className = 'syncbtn ' + cls;
+  el.title = title; el.setAttribute('aria-label', title);
+  el.innerHTML = icon(ic, 19) + (off && pend ? `<span class="cnt">${pend}</span>` : '');
+  if (spin) el.querySelector('.ic-svg')?.classList.add('spin');
+}
+window.addEventListener('online', () => {
+  updateNetBadge();
+  // Drop offline AI placeholders so the summary regenerates when next viewed.
+  Object.keys(state.overview).forEach(g => { if (state.overview[g] && state.overview[g].offline) delete state.overview[g]; });
+  flush();
+  if (activeTab === 'overview' && state.current) ensureOverview(state.current);
+});
+window.addEventListener('offline', updateNetBadge);
+
+async function loadCurrent() {
+  const gid = (me && me.group_id) || lastGid();
+  const snap = gid ? loadSnapshot(gid) : null;
+
+  // Returning user with cached identity + data: render instantly, never block on
+  // the network or a login prompt. Then sync in the background.
+  if (authToken && me && snap) {
+    state.detail = snap; state.current = snap.group.id;
+    recomputeDetail(state.detail);
+    renderMain();
+    flush();
+    return;
+  }
+
+  // First run / no cache: we need the network. Fall back to any snapshot if offline.
+  try {
+    await ensureAuth();
+    state.detail = await api('GET', '/current');
+    state.current = state.detail.group.id;
+    saveSnapshot();
+    renderMain();
+    flush();
+  } catch (e) {
+    if (snap) { state.detail = snap; state.current = snap.group.id; recomputeDetail(state.detail); renderMain(); return; }
+    $('#main').innerHTML = '<div class="empty">Couldn’t load. <a href="#" id="retry">Retry</a></div>';
+    const r = $('#retry');
+    if (r) r.onclick = ev => { ev.preventDefault(); $('#main').innerHTML = '<div class="empty">Loading…</div>'; loadCurrent(); };
+  }
+}
+
+function esc(s){ return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function confirmAction(opts) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'modal-ov';
+    ov.innerHTML = `<div class="modal">
+      <div class="modal-title">${esc(opts.title || 'Are you sure?')}</div>
+      <div class="modal-msg">${esc(opts.message || '')}</div>
+      <div class="modal-actions">
+        <button class="ghost" data-act="cancel">Cancel</button>
+        <button class="${opts.danger?'danger':''}" data-act="ok">${esc(opts.ok || 'Confirm')}</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add('show'));
+    const close = val => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); resolve(val); };
+    ov.querySelector('[data-act=cancel]').onclick = () => close(false);
+    ov.querySelector('[data-act=ok]').onclick = () => close(true);
+    ov.onclick = e => { if (e.target === ov) close(false); };
+    document.addEventListener('keydown', function esc2(e){ if(e.key==='Escape'){ close(false); document.removeEventListener('keydown', esc2);} });
+  });
+}
+
+function settlementModal(d) {
+  if (d.members.length < 2) { toast('Need at least two members'); return; }
+  const opts = d.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal">
+    <div class="modal-title">Manual settlement</div>
+    <div class="modal-msg">Record a payment one member made to another offline.</div>
+    <div class="fields" style="gap:10px;text-align:left">
+      <div><label>From (payer)</label><select id="stFrom">${opts}</select></div>
+      <div><label>To (receiver)</label><select id="stTo">${opts}</select></div>
+      <div><label>Amount</label><input id="stAmt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" /></div>
+    </div>
+    <div class="err" id="stErr"></div>
+    <div class="modal-actions">
+      <button class="ghost" data-act="cancel">Cancel</button>
+      <button data-act="ok">Record</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const fromSel = ov.querySelector('#stFrom'), toSel = ov.querySelector('#stTo');
+  toSel.value = String(d.members[1].id);  // default payer != receiver
+  // payer cannot be the receiver: disable the partner's choice in each dropdown
+  const sync = () => {
+    [...toSel.options].forEach(o => o.disabled = o.value === fromSel.value);
+    [...fromSel.options].forEach(o => o.disabled = o.value === toSel.value);
+  };
+  fromSel.onchange = () => {
+    if (toSel.value === fromSel.value) {
+      const other = [...toSel.options].find(o => o.value !== fromSel.value);
+      if (other) toSel.value = other.value;
+    }
+    sync();
+  };
+  toSel.onchange = () => {
+    if (fromSel.value === toSel.value) {
+      const other = [...fromSel.options].find(o => o.value !== toSel.value);
+      if (other) fromSel.value = other.value;
+    }
+    sync();
+  };
+  sync();
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=cancel]').onclick = close;
+  ov.onclick = e => { if (e.target === ov) close(); };
+  ov.querySelector('[data-act=ok]').onclick = async () => {
+    const from = +ov.querySelector('#stFrom').value;
+    const to = +ov.querySelector('#stTo').value;
+    const amt = parseFloat(ov.querySelector('#stAmt').value);
+    const errEl = ov.querySelector('#stErr'); errEl.textContent = '';
+    if (from === to) { errEl.textContent = 'Payer and receiver must differ.'; return; }
+    if (!(amt > 0)) { errEl.textContent = 'Enter a valid amount.'; return; }
+    queueMutation(
+      { kind: 'settlement', gid: d.group.id, body: { from_member: from, to_member: to, amount: amt } },
+      localAddSettlement,
+    );
+    close(); toast('Settlement recorded');
+  };
+}
+
+// Count-up "ticker" for money figures: eases from 0 to the target paise.
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function animateCount(el) {
+  const target = +el.dataset.count || 0;
+  if (reduceMotion() || !target) { el.textContent = fmt(target); return; }
+  const dur = 780, start = performance.now(), ease = t => 1 - Math.pow(1 - t, 3);
+  (function step(now) {
+    const p = Math.min(1, (now - start) / dur);
+    el.textContent = fmt(Math.round(target * ease(p)));
+    if (p < 1) requestAnimationFrame(step);
+  })(start);
+}
+
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 1700);
+}
+
+const TABS = [
+  ['overview','Overview','home'],
+  ['history','History','history'],
+  ['balance','Balance','balance'],
+];
+let activeTab = localStorage.getItem('split.tab') || 'overview';
+
+function renderMain() {
+  const d = state.detail; if (!d) return;
+  if (!TABS.some(t => t[0] === activeTab)) activeTab = 'overview';
+  $('#main').innerHTML = `<div id="tabbody"></div>
+    <button class="fab" id="fab" aria-label="Add expense"><svg class="plus" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
+    <nav class="bottomnav" id="tabs">
+      ${TABS.map(([k,label,ic])=>`<button data-tab="${k}" class="${activeTab===k?'on':''}"><span class="ic">${icon(ic,23)}</span><span class="lb">${label}</span></button>`).join('')}
+    </nav>`;
+  $('#tabs').querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (activeTab === b.dataset.tab) return;
+    activeTab = b.dataset.tab; localStorage.setItem('split.tab', activeTab);
+    $('#tabs').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    renderTab();
+  });
+  $('#fab').onclick = openExpenseModal;
+  renderTab();
+}
+
+function renderTab() {
+  const d = state.detail, body = $('#tabbody'); if (!body) return;
+  body.innerHTML = ({
+    overview: overviewSection,
+    history: () => historySection(d),
+    balance: () => balanceSection(d),
+  }[activeTab] || overviewSection)();
+  wireTab();
+}
+
+function overviewSection() {
+  const d = state.detail;
+  const active = d.expenses.filter(e => !e.deleted);
+  const total = active.reduce((s, e) => s + e.amount_paise, 0);
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const spentToday = active.filter(e => istDateKey(e.created_at) === todayKey)
+    .reduce((s, e) => s + e.amount_paise, 0);
+  return `
+    <div class="card stats">
+      <div class="stat"><div class="stat-v" data-count="${total}">${fmt(0)}</div><div class="stat-l">Total spent</div></div>
+      <div class="stat"><div class="stat-v" data-count="${spentToday}">${fmt(0)}</div><div class="stat-l">Spent today</div></div>
+    </div>
+    <div class="card">
+      <h2>The crew</h2>
+      <div class="crew">${d.members.map(m=>`
+        <button class="crew-m" data-mid="${m.id}">${avatar(m.name,42)}<span class="name">${esc(m.name)}</span></button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="overview-head"><h2>Overview</h2><button class="ghost sm icon-btn" id="ovRefresh" title="Regenerate">${icon('refresh',16)}</button></div>
+      <div class="overview" id="overviewBox"><span class="muted">Generating…</span></div>
+    </div>
+    <div class="card">
+      <h2>Chat</h2>
+      <div class="chatlog" id="chatLog"></div>
+      <div class="chat-suggest" id="chatSuggest">
+        <button data-q="Who owes the most?">Who owes the most?</button>
+        <button data-q="Summarize this group's spending.">Summarize spending</button>
+        <button data-q="What was the single biggest expense, and who paid for it?">Biggest expense?</button>
+        <button data-q="Who has paid for the most so far?">Who's paid the most?</button>
+        <button data-q="What have we spent the most money on?">Spent most on?</button>
+        <button data-q="What's the simplest way for everyone to settle up?">How to settle up?</button>
+      </div>
+      <div class="addrow">
+        <input id="chatQ" placeholder="Ask about these expenses…" />
+        <button id="chatSend">Ask</button>
+      </div>
+    </div>`;
+}
+
+function expenseFormHtml(d) {
+  const memberOpts = d.members.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
+  return `
+    <div class="fields exp-fields" style="margin-bottom:12px">
+      <div><label>Description</label><input id="eDesc" placeholder="Dinner" /></div>
+      <div><label>Amount</label><div class="amount-field"><span class="cur">₹</span><input id="eAmt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" /></div></div>
+      <div><label>Paid by</label><select id="ePaidBy">${memberOpts}</select></div>
+    </div>
+    <label>Split</label>
+    <div class="seg" id="seg" style="margin-bottom:10px">
+      <button data-t="equal" class="${splitType==='equal'?'on':''}">Equally</button>
+      <button data-t="exact" class="${splitType==='exact'?'on':''}">Exact amounts</button>
+    </div>
+    <div id="splitArea"></div>
+    <div class="err" id="eErr"></div>`;
+}
+
+let expenseModalEl = null;
+function closeExpenseModal() {
+  const ov = expenseModalEl; expenseModalEl = null;
+  if (ov) { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); }
+}
+function openExpenseModal() {
+  const d = state.detail;
+  if (!d || !d.members.length) { toast('No members in this group'); return; }
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal expense-modal">
+    <div class="modal-title">${icon('plus',19)} Add expense</div>
+    <div class="loc-chip" id="locChip" hidden></div>
+    ${expenseFormHtml(d)}
+    <div class="modal-actions">
+      <button class="ghost" data-act="cancel">Cancel</button>
+      <button id="addExpense">Add expense</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  expenseModalEl = ov;
+  requestAnimationFrame(() => ov.classList.add('show'));
+  ov.querySelector('[data-act=cancel]').onclick = closeExpenseModal;
+  ov.onclick = e => { if (e.target === ov) closeExpenseModal(); };
+  document.addEventListener('keydown', function onEsc(e){
+    if (e.key === 'Escape') { closeExpenseModal(); document.removeEventListener('keydown', onEsc); }
+  });
+  wireExpenseForm(d);
+}
+
+function wireExpenseForm(d) {
+  const pb = $('#ePaidBy');
+  const key = 'split.paidBy.' + d.group.id;
+  const saved = localStorage.getItem(key);
+  // Default the payer to whoever is signed in; a saved choice still wins.
+  if (me && [...pb.options].some(o => o.value === String(me.member_id))) pb.value = String(me.member_id);
+  if (saved && [...pb.options].some(o => o.value === saved)) pb.value = saved;
+  pb.onchange = () => localStorage.setItem(key, pb.value);
+  renderSplitArea();
+  $('#seg').querySelectorAll('button').forEach(b => b.onclick = () => {
+    splitType = b.dataset.t;
+    $('#seg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+    renderSplitArea();
+  });
+  $('#addExpense').onclick = addExpense;
+  $('#eAmt').addEventListener('input', () => { if (splitType === 'exact') renderSplitArea(); });
+  $('#eDesc').focus();
+  fillDescSuggestion();
+}
+
+function balanceSection(d) {
+  const maxAbs = Math.max(1, ...d.balances.map(b => Math.abs(b.net_paise)));
+  return `
+    <div class="card">
+      <h2>Who owes what</h2>
+      ${d.balances.length ? d.balances.map(b=>`
+        <div class="balrow">
+          <div class="balrow-top">${avatar(b.name)}<span class="balname">${esc(b.name)}</span>
+            <span class="${b.net_paise>0?'pos':b.net_paise<0?'neg':'zero'}">
+              ${b.net_paise>0 ? 'lent '+fmt(b.net_paise)
+                : b.net_paise<0 ? 'owes '+fmt(-b.net_paise)
+                : 'settled up'}
+            </span></div>
+          <div class="bar"><div class="bar-fill ${b.net_paise>=0?'pos':'neg'}" style="width:${Math.abs(b.net_paise)/maxAbs*100}%"></div></div>
+        </div>`).join('') : '<div class="muted">Nothing yet.</div>'}
+    </div>
+    <div class="card">
+      <div class="overview-head"><h2>Settle up</h2><button class="ghost pill-btn" id="manualSettle">Manual settlement</button></div>
+      <p class="hint-line">Fewest transfers to settle up — settle offline.</p>
+      ${d.suggestions.length ? d.suggestions.map(s=>`
+        <div class="sug">
+          <span class="who">${avatar(s.from_name,24)}<b>${esc(s.from_name)}</b> <span class="arrow">→</span> ${avatar(s.to_name,24)}<b>${esc(s.to_name)}</b></span>
+          <span class="amt">${fmt(s.amount_paise)}</span>
+        </div>`).join('') : '<div class="muted">All settled up ✦</div>'}
+    </div>`;
+}
+
+function expRow(e) {
+  return `
+    <div class="exp clickable ${e.deleted?'deleted':''}" data-exp="${e.id}">
+      <div class="exp-main">${avatar(e.paid_by_name)}
+        <div><div class="exp-desc">${esc(e.description)}</div>
+          <div class="meta">${esc(e.paid_by_name)}${e.added_by_name && e.added_by !== e.paid_by ? ` · added by ${esc(e.added_by_name)}` : ''} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}${e.pending?' · ⏳ not synced':''}</div></div></div>
+      <div class="exp-right">
+        <span class="amt">${fmt(e.amount_paise)}</span>
+        ${e.deleted
+          ? `<button class="ghost sm" data-undel="${e.id}">Undo</button>`
+          : `<button class="ghost sm icon-btn" data-del="${e.id}" title="Delete">${icon('close',15)}</button>`}</div>
+    </div>`;
+}
+
+function historySection(d) {
+  // group expenses by IST date, preserving newest-first order
+  const groups = [], seen = {};
+  d.expenses.forEach(e => {
+    const k = istDateKey(e.created_at);
+    if (!seen[k]) { seen[k] = []; groups.push([k, seen[k]]); }
+    seen[k].push(e);
+  });
+  return `
+    <div class="card">
+      <h2>History</h2>
+      ${d.expenses.length ? groups.map(([k, items]) =>
+        `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
+      ).join('') : '<div class="muted">No expenses yet. Tap the ➕ button to add one.</div>'}
+    </div>
+    ${d.settlements.length ? `
+    <div class="card">
+      <h2>Payments</h2>
+      ${d.settlements.map(s=>`
+        <div class="exp">
+          <div class="exp-main">${avatar(s.from_name)}
+            <div><div class="exp-desc">${esc(s.from_name)} <span class="arrow">→</span> ${esc(s.to_name)}</div>
+              <div class="meta">settlement · ${fmtDate(s.created_at)}${s.pending?' · ⏳ not synced':''}</div></div></div>
+          <span class="amt">${fmt(s.amount_paise)}</span>
+        </div>`).join('')}
+    </div>` : ''}`;
+}
+
+// Best-effort device location, reused for ~10 min. Asks the browser at most once
+// per session; on denial/unsupported we remember and never block on it again.
+let geoState = { coords: null, at: 0, denied: false, pending: null };
+function getCoords() {
+  if (geoState.denied) return Promise.resolve(null);               // user explicitly blocked
+  if (!navigator.geolocation) { console.warn('[geo] Geolocation API unavailable (needs HTTPS).'); return Promise.resolve(null); }
+  if (!window.isSecureContext) console.warn('[geo] Not a secure context — geolocation may be blocked. Use HTTPS or localhost.');
+  if (geoState.coords && Date.now() - geoState.at < 600000) return Promise.resolve(geoState.coords);
+  if (geoState.pending) return geoState.pending;
+  geoState.pending = new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        geoState.coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        geoState.at = Date.now(); geoState.pending = null;
+        console.info('[geo] fix:', geoState.coords);
+        resolve(geoState.coords);
+      },
+      err => {
+        geoState.pending = null;
+        // Only a real permission denial (code 1) should stop us asking again this
+        // session. Timeouts/position-unavailable are transient — allow a retry.
+        if (err && err.code === 1) { geoState.denied = true; console.warn('[geo] permission denied'); }
+        else console.warn('[geo] error (will retry):', err && err.message, 'code', err && err.code);
+        resolve(null);
+      },
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
+    );
+  });
+  return geoState.pending;
+}
+
+// Best-effort suggestion. The time-of-day activity loads instantly; the "@ place"
+// tag is added in the background once (slow) geolocation resolves, so location
+// never blocks the suggestion.
+let descSuggestion = { text: '', at: 0, place: '' };
+function setLocChip(html, cls) {
+  const chip = $('#locChip');
+  if (!chip) return;
+  if (!html) { chip.hidden = true; return; }
+  chip.className = 'loc-chip' + (cls ? ' ' + cls : '');
+  chip.innerHTML = html;
+  chip.hidden = false;
+}
+function showLocChip() {
+  if (descSuggestion.place) setLocChip(icon('pin',13) + ' ' + esc(descSuggestion.place));
+  else setLocChip('');
+}
+function showLocLoading() { setLocChip('<span class="loc-spin"></span> Locating…', 'loading'); }
+const shortPlace = p => (p || '').split(',')[0].trim();
+
+async function fillDescSuggestion() {
+  const desc = $('#eDesc');
+  if (!desc || desc.value) return;
+  let touched = false, lastSet = '';
+  desc.addEventListener('input', () => { touched = true; }, { once: true });
+  const display = () => descSuggestion.text
+    + (descSuggestion.place ? ' @ ' + shortPlace(descSuggestion.place) : '');
+  // Write our suggestion only while the user hasn't typed and the field still
+  // holds whatever we last put there (so we never clobber manual edits).
+  const apply = () => {
+    if (touched || !descSuggestion.text) return;
+    if (desc.value && desc.value !== lastSet) return;
+    lastSet = display();
+    desc.value = lastSet;
+    desc.classList.add('suggested');
+    desc.addEventListener('focus', () => desc.classList.remove('suggested'), { once: true });
+  };
+
+  // 1) Fast: time-of-day suggestion, no location, no blocking.
+  try {
+    if (!descSuggestion.text || Date.now() - descSuggestion.at > 1800000) {
+      const r = await api('GET', '/suggest-description');
+      descSuggestion.text = r.suggestion || ''; descSuggestion.at = Date.now();
+    }
+    apply(); showLocChip();
+  } catch (e) { /* suggestion is optional */ }
+
+  // 2) Background: resolve location (with a spinner), then tag "@ place" on.
+  try {
+    if (!descSuggestion.place && !geoState.denied && navigator.geolocation) showLocLoading();
+    const coords = await getCoords();
+    if (!coords) { showLocChip(); return; }          // hides spinner if no fix
+    const r = await api('GET', `/reverse-geocode?lat=${coords.lat}&lon=${coords.lon}`);
+    if (!r.place) { console.warn('[geo] coords sent but no place resolved:', r); showLocChip(); return; }
+    descSuggestion.place = r.place;
+    showLocChip(); apply();
+  } catch (e) { showLocChip(); /* location tag is optional */ }
+}
+
+let splitType = 'equal';
+function renderSplitArea() {
+  const d = state.detail, area = $('#splitArea'); if (!area) return;
+  if (splitType==='equal') {
+    area.innerHTML = d.members.map((x,i)=>`
+      <label class="splitrow" style="animation-delay:${i*35}ms"><input type="checkbox" class="pp" value="${x.id}" checked>
+        ${avatar(x.name)}<span>${esc(x.name)}</span></label>`).join('');
+  } else {
+    const seed = equalSeed();  // pre-fill an equal split; user edits afterwards
+    area.innerHTML = d.members.map((x,i)=>`
+      <div class="splitrow" style="animation-delay:${i*35}ms">${avatar(x.name)}<span>${esc(x.name)}</span>
+        <input class="exact" data-m="${x.id}" type="number" inputmode="decimal" min="0" step="0.01" value="${seed[i]}" placeholder="0.00"></div>`).join('')
+      + `<div class="split-sum" id="splitSum"></div>`;
+    area.querySelectorAll('.exact').forEach(inp => inp.addEventListener('input', updateSplitSum));
+    updateSplitSum();
+  }
+}
+
+function totalPaise() { return Math.round((parseFloat($('#eAmt')?.value) || 0) * 100); }
+
+function equalSeed() {
+  const d = state.detail, n = d.members.length, t = totalPaise();
+  if (!t || !n) return d.members.map(() => '');
+  const base = Math.floor(t / n), rem = t - base * n;
+  return d.members.map((_, i) => ((base + (i < rem ? 1 : 0)) / 100).toFixed(2));
+}
+
+function exactSumPaise() {
+  let sum = 0;
+  document.querySelectorAll('.exact').forEach(i => { const v = parseFloat(i.value); if (v > 0) sum += Math.round(v * 100); });
+  return sum;
+}
+
+function updateSplitSum() {
+  const el = $('#splitSum'); if (!el) return;
+  const t = totalPaise(), s = exactSumPaise();
+  if (!t) { el.textContent = 'Enter the total amount above first.'; el.className = 'split-sum'; return; }
+  if (s === t) { el.textContent = `✓ Splits add up to ${fmt(t)}`; el.className = 'split-sum ok'; }
+  else { el.textContent = `Splits total ${fmt(s)} — must equal ${fmt(t)} (off by ${fmt(Math.abs(s - t))})`; el.className = 'split-sum bad'; }
+}
+
+function wireTab() {
+  const d = state.detail;
+  if (activeTab === 'overview') {
+    $('#tabbody').querySelectorAll('.stat-v[data-count]').forEach(animateCount);
+    $('#tabbody').querySelectorAll('.crew-m').forEach(b => b.onclick = () => {
+      const m = d.members.find(x => x.id === +b.dataset.mid);
+      if (m) memberModal(m);
+    });
+    renderChat();
+    ensureOverview(d.group.id);
+    const rb = $('#ovRefresh');
+    if (rb) rb.onclick = () => { delete state.overview[d.group.id]; ensureOverview(d.group.id); };
+    $('#chatSend').onclick = () => sendChat($('#chatQ').value);
+    $('#chatQ').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat($('#chatQ').value); });
+    $('#chatSuggest').querySelectorAll('button').forEach(b => b.onclick = () => sendChat(b.dataset.q));
+  }
+  if (activeTab === 'history') {
+    $('#tabbody').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!await confirmAction({ title:'Delete expense?',
+        message:'It will be struck through and kept in history — you can undo it later.',
+        ok:'Delete', danger:true })) return;
+      const eid = b.dataset.del;
+      const exp = d.expenses.find(x => String(x.id) === String(eid));
+      // Never synced yet: drop the queued add and remove it locally — there's no
+      // server row to delete, so we don't enqueue a delete for a phantom id.
+      if (exp && exp.pending) {
+        outbox = outbox.filter(o => !(o.kind === 'expense' && o.client_id === exp.client_id));
+        saveOutbox();
+        d.expenses = d.expenses.filter(x => x !== exp);
+        recomputeDetail(d); saveSnapshot(); renderMain();
+        toast('Expense removed');
+        return;
+      }
+      queueMutation({ kind: 'delete', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, true));
+      toast('Expense deleted');
+    });
+    $('#tabbody').querySelectorAll('[data-undel]').forEach(b => b.onclick = async () => {
+      if (!await confirmAction({ title:'Restore expense?',
+        message:'This expense will count toward balances again.', ok:'Restore' })) return;
+      const eid = b.dataset.undel;
+      queueMutation({ kind: 'restore', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, false));
+      toast('Expense restored');
+    });
+    $('#tabbody').querySelectorAll('[data-exp]').forEach(row => row.onclick = ev => {
+      if (ev.target.closest('button')) return;  // let delete/undo buttons work
+      const e = d.expenses.find(x => String(x.id) === String(row.dataset.exp));  // ids may be uuids (pending) or ints
+      if (e) expenseModal(e);
+    });
+  }
+  if (activeTab === 'balance') {
+    const ms = $('#manualSettle');
+    if (ms) ms.onclick = () => settlementModal(d);
+  }
+}
+
+const OVERVIEW_PROMPT =
+  "Write a friendly overview of this group's trip in exactly TWO short paragraphs, " +
+  "separated by a blank line.\n\n" +
+  "Paragraph 1 (the money): in 2-3 sentences give the total spent, who has paid the " +
+  "most, and the headline of who owes whom. Use ₹.\n\n" +
+  "Paragraph 2 (fun tidbits): act like a playful trip companion. Mine the expense " +
+  "descriptions, timings and amounts for 1-2 fun travel observations — e.g. the " +
+  "biggest single splurge, the busiest spending day, a food/chai obsession, the " +
+  "priciest meal, an unusually late-night expense, or any pattern that hints at how " +
+  "the journey is going. Keep it light and witty, grounded only in the data.\n\n" +
+  "Plain prose only — no headings, no bullet lists.";
+
+function renderOverviewBox() {
+  const box = $('#overviewBox'); if (!box) return;
+  const ov = state.overview[state.current];
+  box.innerHTML = ov && ov.text
+    ? mdToHtml(ov.text)
+    : '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
+}
+
+async function ensureOverview(gid) {
+  const ov = state.overview[gid];
+  if (ov && (ov.text || ov.loading)) { renderOverviewBox(); return; }
+  // AI needs the network — don't try (and don't cache) when offline; the user can
+  // tap refresh once back online.
+  if (!navigator.onLine) {
+    state.overview[gid] = { text: '*The trip summary needs a connection — it’ll be back online.*', loading: false, offline: true };
+    renderOverviewBox();
+    return;
+  }
+  state.overview[gid] = { text: '', loading: true };
+  renderOverviewBox();
+  try {
+    const r = await fetchAuthed('/api/groups/'+gid+'/ask', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question: OVERVIEW_PROMPT }),
+    });
+    if (!r.ok) { const t = await r.json().catch(()=>({detail:r.statusText})); throw new Error(t.detail||'error'); }
+    const reader = r.body.getReader(); const dec = new TextDecoder();
+    state.overview[gid].text = '';
+    while (true) {
+      const {done, value} = await reader.read(); if (done) break;
+      state.overview[gid].text += dec.decode(value, {stream:true}); renderOverviewBox();
+    }
+    if (!state.overview[gid].text) state.overview[gid].text = '_No expenses yet._';
+  } catch(e) { state.overview[gid].text = '⚠ ' + e.message; }
+  state.overview[gid].loading = false; renderOverviewBox();
+}
+
+function renderChat() {
+  const log = $('#chatLog'); if (!log) return;
+  const hist = state.chats[state.current] || [];
+  if (!hist.length) {
+    log.innerHTML = '<div class="msg hint">Ask anything about this group’s expenses.</div>';
+    return;
+  }
+  log.innerHTML = hist.map(m => {
+    const body = m.role==='user' ? esc(m.content) : (mdToHtml(m.content) || '…');
+    return `<div class="msg ${m.role==='user'?'user':'bot'}">${body}</div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+// Minimal, XSS-safe Markdown -> HTML (everything is escaped before formatting).
+function mdToHtml(src) {
+  const e = s => s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const inline = s => e(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = (src||'').replace(/\r/g,'').split('\n');
+  let html='', i=0, para=[];
+  const flush = () => { if (para.length) { html+='<p>'+para.map(inline).join('<br>')+'</p>'; para=[]; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) { flush(); i++; const code=[];
+      while (i<lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+      i++; html+='<pre><code>'+e(code.join('\n'))+'</code></pre>'; continue; }
+    let h;
+    if ((h = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); html+='<strong class="md-h">'+inline(h[2])+'</strong>'; i++; continue; }
+    if (/^\s*[-*]\s+/.test(line)) { flush(); html+='<ul>';
+      while (i<lines.length && /^\s*[-*]\s+/.test(lines[i])) { html+='<li>'+inline(lines[i].replace(/^\s*[-*]\s+/,''))+'</li>'; i++; }
+      html+='</ul>'; continue; }
+    if (/^\s*\d+\.\s+/.test(line)) { flush(); html+='<ol>';
+      while (i<lines.length && /^\s*\d+\.\s+/.test(lines[i])) { html+='<li>'+inline(lines[i].replace(/^\s*\d+\.\s+/,''))+'</li>'; i++; }
+      html+='</ol>'; continue; }
+    if (line.trim()==='') { flush(); i++; continue; }
+    para.push(line); i++;
+  }
+  flush();
+  return html;
+}
+
+let chatBusy = false;
+async function sendChat(q) {
+  q = (q||'').trim(); if (!q || chatBusy) return;
+  const gid = state.current;
+  const hist = state.chats[gid] || (state.chats[gid] = []);
+  // The chat is AI-backed, so it needs the network. Offline, answer locally with a
+  // friendly note instead of a failed request.
+  if (!navigator.onLine) {
+    $('#chatQ').value = '';
+    hist.push({ role: 'user', content: q });
+    hist.push({ role: 'assistant', content: 'I need an internet connection to answer — your balances and history still work offline, though.' });
+    renderChat();
+    return;
+  }
+  const priorTurns = hist.map(m => ({role:m.role, content:m.content}));
+  $('#chatQ').value = '';
+  hist.push({role:'user', content:q});
+  hist.push({role:'assistant', content:''});
+  const idx = hist.length - 1;
+  chatBusy = true; renderChat();
+  try {
+    const r = await fetchAuthed('/api/groups/'+gid+'/ask', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q, history:priorTurns}),
+    });
+    if (!r.ok) { const t = await r.json().catch(()=>({detail:r.statusText})); throw new Error(t.detail||'error'); }
+    const reader = r.body.getReader(); const dec = new TextDecoder();
+    while (true) {
+      const {done, value} = await reader.read(); if (done) break;
+      hist[idx].content += dec.decode(value, {stream:true}); renderChat();
+    }
+    if (!hist[idx].content) hist[idx].content = '(no answer)';
+  } catch(e) { hist[idx].content = '⚠ ' + e.message; }
+  chatBusy = false; renderChat();
+}
+
+async function addExpense() {
+  const d = state.detail, err = $('#eErr'); err.textContent='';
+  const description = $('#eDesc').value.trim();
+  const amount = parseFloat($('#eAmt').value);
+  const paid_by = +$('#ePaidBy').value;
+  localStorage.setItem('split.paidBy.' + d.group.id, String(paid_by));
+  if (!description || !(amount>0)) { err.textContent='Enter a description and amount.'; return; }
+  const body = { description, amount, paid_by, split_type: splitType };
+  if (splitType==='equal') {
+    body.members = [...document.querySelectorAll('.pp:checked')].map(c=>+c.value);
+    if (!body.members.length) { err.textContent='Pick at least one person.'; return; }
+  } else {
+    body.shares = {};
+    document.querySelectorAll('.exact').forEach(i=>{ const v=parseFloat(i.value); if(v>0) body.shares[+i.dataset.m]=v; });
+    const t = Math.round(amount*100), s = exactSumPaise();
+    if (s !== t) { err.textContent = `Splits total ${fmt(s)} — must equal ${fmt(t)}.`; return; }
+  }
+  // Apply optimistically + queue for sync. Works identically on- and offline:
+  // online, flush() pushes it right away; offline, it waits in the outbox.
+  queueMutation({ kind: 'expense', gid: d.group.id, body }, localAddExpense);
+  closeExpenseModal();
+  expenseAddedModal();
+}
+
+let mermaidMod = null, chartSeq = 0;
+async function getMermaid() {
+  if (!mermaidMod) {
+    mermaidMod = (await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs')).default;
+  }
+  return mermaidMod;
+}
+// Build mermaid config from the live theme so the pie text contrasts with the
+// modal — a fixed 'dark' theme rendered near-white text that was invisible on
+// the light theme. Driven by our CSS vars (--text is dark on light, light on
+// dark), so it follows the toggle.
+function mermaidConfig() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = n => cs.getPropertyValue(n).trim();
+  const text = v('--text'), line = v('--line');
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      fontFamily: v('--font-body') || 'sans-serif',
+      // Title + legend sit on the modal background, so follow the theme text colour.
+      textColor: text,
+      pieTitleTextColor: text,
+      pieLegendTextColor: text,
+      // Slice values sit on the (always light) pastel wedges, so keep them dark
+      // in both themes for contrast — matching mermaid's own default.
+      pieSectionTextColor: '#1a1a2e',
+      pieStrokeColor: line,
+      pieOuterStrokeColor: line,
+    },
+  };
+}
+
+function memberModal(m) {
+  const d = state.detail;
+  const active = d.expenses.filter(e => !e.deleted);
+  const paidList = active.filter(e => e.paid_by === m.id);
+  const paid = paidList.reduce((s, e) => s + e.amount_paise, 0);
+  let share = 0;
+  active.forEach(e => (e.shares || []).forEach(s => { if (s.member_id === m.id) share += s.share_paise; }));
+  const bal = d.balances.find(b => b.member_id === m.id);
+  const net = bal ? bal.net_paise : 0;
+  const first = esc((m.name || '').split(/\s+/)[0]);
+  const status = net > 0 ? `is owed <b class="pos">${fmt(net)}</b>`
+    : net < 0 ? `owes <b class="neg">${fmt(-net)}</b>`
+    : `is all <b>settled up</b> ✦`;
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal">
+    <div class="modal-title" style="display:flex;align-items:center;gap:10px">${avatar(m.name,40)} ${esc(m.name)}</div>
+    <div class="modal-msg">${first} ${status}.</div>
+    <div class="stats" style="margin-bottom:14px">
+      <div class="stat"><div class="stat-v">${fmt(paid)}</div><div class="stat-l">Paid</div></div>
+      <div class="stat"><div class="stat-v">${fmt(share)}</div><div class="stat-l">Their share</div></div>
+      <div class="stat"><div class="stat-v">${paidList.length}</div><div class="stat-l">Expenses</div></div>
+    </div>
+    <div class="split-list">${paidList.length
+      ? paidList.map(e=>`<div class="bal"><span class="exp-desc">${esc(e.description)}</span><span class="amt">${fmt(e.amount_paise)}</span></div>`).join('')
+      : `<div class="muted">${first} hasn’t paid for anything yet.</div>`}</div>
+    <div class="modal-actions"><button data-act="ok">Close</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=ok]').onclick = close;
+  ov.onclick = ev => { if (ev.target === ov) close(); };
+}
+
+function expenseModal(e) {
+  const shares = (e.shares || []).slice().sort((a, b) => b.share_paise - a.share_paise);
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal">
+    <div class="modal-title">${esc(e.description)}${e.deleted ? ' <span class="muted">(deleted)</span>' : ''}</div>
+    <div class="modal-msg">${fmt(e.amount_paise)} · ${fmtDate(e.created_at)}</div>
+    <div class="who-row">
+      <span class="who-pill">${avatar(e.paid_by_name, 22)}<span><span class="who-lbl">Paid by</span> <b>${esc(e.paid_by_name)}</b></span></span>
+      <span class="who-pill">${e.added_by_name ? avatar(e.added_by_name, 22) : ''}<span><span class="who-lbl">Added by</span> <b>${e.added_by_name ? esc(e.added_by_name) : '—'}</b></span></span>
+    </div>
+    <div id="splitChart" class="split-chart"><span class="muted">Loading chart…</span></div>
+    <div class="split-list">${shares.length ? shares.map(s=>`
+      <div class="bal"><span>${esc(s.name)}</span><span>${fmt(s.share_paise)}</span></div>`).join('') : '<div class="muted">No split details.</div>'}</div>
+    <div class="modal-actions"><button data-act="ok">Close</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=ok]').onclick = close;
+  ov.onclick = ev => { if (ev.target === ov) close(); };
+  renderSplitChart(ov.querySelector('#splitChart'), e, shares);
+}
+
+async function renderSplitChart(box, e, shares) {
+  if (!box) return;
+  if (!shares.length) { box.style.display = 'none'; return; }
+  try {
+    const mermaid = await getMermaid();
+    mermaid.initialize(mermaidConfig());  // re-apply each render so it tracks the current theme
+    const safe = s => (s + '').replace(/["\n]/g, ' ').slice(0, 40);
+    const def = 'pie showData\n  title Split — ' + safe(e.description) + '\n' +
+      shares.map(s => `  "${safe(s.name)}" : ${(s.share_paise / 100).toFixed(2)}`).join('\n');
+    const { svg } = await mermaid.render('pie' + (++chartSeq), def);
+    box.innerHTML = svg;
+  } catch (err) { box.style.display = 'none'; }
+}
+
+function expenseAddedModal() {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal success">
+    <div class="thumb">👍</div>
+    <div class="modal-title">Expense Added</div>
+    <div class="modal-actions">
+      <button data-act="ok">Add Another</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=ok]').onclick = () => { close(); openExpenseModal(); };
+  ov.onclick = e => { if (e.target === ov) close(); };
+}
+
+updateNetBadge();
+$('#netBadge').onclick = () => {
+  if (!navigator.onLine && pendingCount()) toast('Offline — your changes are saved and will sync automatically.');
+  flush();  // always attempt: navigator.onLine may be wrong, so let the fetch decide
+};
+loadCurrent();
+
+// ============================================================================
+//  Push notifications — subscribe via the service worker, manage per-category prefs
+// ============================================================================
+const NOTIFY_CATS = [
+  ['new_expense', 'New expenses'],
+  ['settlement', 'Settlements'],
+  ['balance', 'When you owe or are owed'],
+  ['delete_restore', 'Deleted or restored expenses'],
+];
+const pushSupported = () =>
+  'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+function sameKey(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const x = new Uint8Array(a), y = new Uint8Array(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+async function enablePush(publicKey) {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Notifications were not allowed');
+  const reg = await navigator.serviceWorker.ready;
+  const appKey = urlB64ToUint8Array(publicKey);
+  let sub = await reg.pushManager.getSubscription();
+  // A subscription made with a different (rotated) VAPID key can never receive our
+  // pushes — drop it and re-subscribe with the current key.
+  if (sub && !sameKey(sub.options && sub.options.applicationServerKey, appKey.buffer)) {
+    try { await sub.unsubscribe(); } catch (_) {}
+    sub = null;
+  }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+  await api('POST', '/notify/subscribe', sub.toJSON());
+}
+async function disablePush() {
+  const sub = await currentSubscription();
+  if (!sub) return;
+  try { await api('POST', '/notify/unsubscribe', { endpoint: sub.endpoint }); } catch (_) {}
+  await sub.unsubscribe();
+}
+
+async function renderSettings(box) {
+  if (!pushSupported()) {
+    box.innerHTML = '<p class="muted">Notifications aren’t supported on this device or browser. On iPhone, install the app to your Home Screen first (Share → Add to Home Screen).</p>';
+    return;
+  }
+  let cfg = { enabled: false };
+  try { cfg = await api('GET', '/notify/config'); } catch (_) {}
+  if (!cfg.enabled) {
+    box.innerHTML = '<p class="muted">Notifications aren’t set up on the server yet.</p>';
+    return;
+  }
+  let prefs = {};
+  try { prefs = await api('GET', '/notify/prefs'); } catch (_) {}
+  const sub = await currentSubscription();
+  const denied = Notification.permission === 'denied';
+  const on = !!sub && Notification.permission === 'granted';
+  box.innerHTML = `
+    <label class="notif-row"><span class="notif-lead">Enable notifications</span>
+      <input type="checkbox" id="notifMaster" ${on ? 'checked' : ''} ${denied ? 'disabled' : ''}></label>
+    ${denied ? '<p class="muted">Blocked in your browser/OS settings — re-enable Spliti notifications there to turn this on.</p>' : ''}
+    <div class="notif-cats ${on ? '' : 'dim'}" id="notifCats">
+      ${NOTIFY_CATS.map(([k, label]) => `<label class="notif-row"><span>${label}</span>
+        <input type="checkbox" data-cat="${k}" ${prefs[k] !== false ? 'checked' : ''}></label>`).join('')}
+    </div>`;
+  const master = box.querySelector('#notifMaster');
+  if (master) master.onchange = async () => {
+    master.disabled = true;
+    try {
+      if (master.checked) { await enablePush(cfg.public_key); toast('Notifications on'); }
+      else { await disablePush(); toast('Notifications off'); }
+    } catch (e) { toast(e.message || 'Couldn’t change notifications'); }
+    renderSettings(box);  // reflect the new state (also re-enables the control)
+  };
+  box.querySelectorAll('[data-cat]').forEach(cb => cb.onchange = async () => {
+    const next = {};
+    box.querySelectorAll('[data-cat]').forEach(c => { next[c.dataset.cat] = c.checked; });
+    try { await api('PUT', '/notify/prefs', next); } catch (_) { toast('Couldn’t save that preference'); }
+  });
+}
+
+function settingsModal() {
+  const ov = document.createElement('div');
+  ov.className = 'modal-ov';
+  ov.innerHTML = `<div class="modal">
+    <div class="modal-title">Notifications</div>
+    <div id="setBody" class="modal-msg" style="margin-bottom:14px">Loading…</div>
+    <div class="modal-actions"><button data-act="ok">Done</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('show'));
+  const close = () => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 200); };
+  ov.querySelector('[data-act=ok]').onclick = close;
+  ov.onclick = e => { if (e.target === ov) close(); };
+  renderSettings(ov.querySelector('#setBody'));
+}
+$('#settingsBtn').onclick = settingsModal;
+
+// Background sync: periodically retry the outbox and pull in anything other
+// members added. flush() guards against overlap and attempts the network itself
+// (it doesn't trust navigator.onLine), so firing it on a timer, on regaining
+// focus/visibility, and on the 'online' event means a reconnect is picked up
+// within one interval even when the 'online' event never fires.
+const SYNC_INTERVAL_MS = 20000;
+setInterval(() => { if (state.current) flush(); }, SYNC_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.current) flush(); });
+window.addEventListener('focus', () => { if (state.current) flush(); });
+
+// Register the service worker so the app is installable / works standalone.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+  // A push that arrives while the app is open asks us to sync in place rather
+  // than show a banner (see sw.js) — reuse the normal sync path.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'sync' && state.current) flush();
+  });
+}
+</script>
+</body>
+</html>

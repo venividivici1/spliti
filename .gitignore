@@ -18,3 +18,12 @@ spliti/*.db
 htmlcov/
 *.egg-info/
 vapid_private.pem
+
+# Google Cloud service-account keys (Firestore mirror credentials)
+*-service-account.json
+service-account*.json
+gcp-credentials*.json
+gcp_sa.json
+
+# WSL/Windows download artifacts
+*:Zone.Identifier
