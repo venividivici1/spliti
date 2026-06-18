@@ -11,7 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
@@ -605,9 +605,11 @@ def export_csv(gid: int) -> StreamingResponse:
 
         buf.seek(0)
         filename = f"spliti-{group['name'].lower().replace(' ', '-')}-expenses.csv"
-        return StreamingResponse(
-            iter([buf.getvalue()]),
-            media_type="text/csv",
+        # UTF-8 BOM as raw bytes so Excel recognises ₹ and other Unicode
+        raw = b"\xef\xbb\xbf" + buf.getvalue().encode("utf-8")
+        return Response(
+            content=raw,
+            media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     finally:
