@@ -50,6 +50,17 @@ def test_stream_requires_auth(client):
     assert client.get("/health/stream").status_code == 401
 
 
+def test_available_reflects_psutil():
+    assert health.available() is True  # psutil is installed in the test env
+
+
+def test_stream_503_when_psutil_unavailable(client, monkeypatch):
+    """A missing psutil degrades to a 503 on this route, never a crash."""
+    monkeypatch.setattr(health, "psutil", None)
+    r = client.get("/health/stream", auth=AUTH)
+    assert r.status_code == 503
+
+
 def test_stream_response_is_sse_with_metrics():
     """Drive the route function directly: assert it's an SSE response whose first
     event is a JSON metrics snapshot. (We pull a single event rather than stream

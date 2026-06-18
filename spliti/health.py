@@ -11,7 +11,13 @@ import socket
 import threading
 import time
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    # psutil is an optional dependency: if it's missing the /health dashboard is
+    # unavailable, but the rest of the app must still import and run. Never let a
+    # missing dashboard dep take down the whole service.
+    psutil = None
 
 # Don't recompute a fresh sample more often than this, however many viewers are
 # connected. The SSE stream ticks slower than this anyway (see app.py).
@@ -23,7 +29,13 @@ _prev: dict = {"ts": None, "net": None, "disk": None}  # for rate deltas
 
 # Prime cpu_percent so the first real sample reflects usage since import (a first
 # interval=None call always returns 0.0 — it has nothing to diff against yet).
-psutil.cpu_percent(interval=None)
+if psutil is not None:
+    psutil.cpu_percent(interval=None)
+
+
+def available() -> bool:
+    """Whether system metrics can be sampled (i.e. psutil is installed)."""
+    return psutil is not None
 
 
 def _rate(curr: float, prev: float | None, dt: float) -> float:
