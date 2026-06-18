@@ -23,3 +23,7 @@ vapid_private.pem
 *-service-account.json
 service-account*.json
 gcp-credentials*.json
+gcp_sa.json
+
+# WSL/Windows download artifacts
+*:Zone.Identifier
