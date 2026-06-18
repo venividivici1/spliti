@@ -42,6 +42,9 @@
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
+  /* Suppress the double-tap-to-zoom jump on taps without disabling pinch-zoom
+     (keeps it accessible — WCAG 1.4.4). */
+  button, .seg, .tabs, .bottomnav, .syncbtn, .theme-toggle { touch-action: manipulation; }
   body { margin: 0; font: 16px/1.55 var(--font-body);
     /* Fill the viewport so the fixed gradient always covers the screen. Without
        this, a short tab (empty History/Balance) leaves the body shorter than the
@@ -67,6 +70,21 @@
     color: var(--muted); transition: color 0.2s ease, background 0.2s ease; flex: none; }
   .theme-toggle:hover { color: var(--accent); background: var(--hover-highlight); }
   .theme-toggle svg { width: 18px; height: 18px; }
+
+  /* the title column grows so the sync icon + toggle always sit at the right edge */
+  header > div { flex: 1 1 auto; min-width: 0; }
+  /* small sync-status icon (tap to force a sync) */
+  .syncbtn { flex: none; display: inline-flex; align-items: center; gap: 4px;
+    background: none; border: none; cursor: pointer; padding: 6px; min-height: 0;
+    border-radius: 999px; transition: color 0.2s ease, background 0.2s ease; }
+  .syncbtn .ic-svg { width: 19px; height: 19px; }
+  .syncbtn .cnt { font-size: 10px; font-weight: 700; line-height: 1;
+    background: var(--accent); color: var(--btn-text); border-radius: 999px; padding: 2px 5px; }
+  .syncbtn.ok { color: var(--green); }
+  .syncbtn.busy { color: var(--accent); }
+  .syncbtn.off { color: var(--muted); }
+  .syncbtn.off .cnt { background: var(--muted); color: #fff; }
+  .syncbtn .ic-svg.spin { animation: spin 0.9s linear infinite; transform-origin: 50% 50%; }
 
   /* ---- header (mobile-first, sticky) ---- */
   header { position: sticky; top: 0; z-index: 10; flex: none;
@@ -105,6 +123,9 @@
   button:active { transform: scale(0.98); }
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
   button.sm { padding: 8px 12px; min-height: 38px; font-size: 14px; }
+  /* compact pill — for secondary actions sitting next to a small heading */
+  button.pill-btn { min-height: 0; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    border-radius: 999px; }
 
   .addrow { display: flex; gap: 8px; }
   .addrow input { flex: 1; }
@@ -395,6 +416,7 @@
     <h1><span class="b">Spliti</span></h1>
     <span class="sub">Spiti trip · split expenses</span>
   </div>
+  <button class="syncbtn" id="netBadge" type="button" aria-live="polite" title="Sync status"></button>
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark mode" title="Toggle theme">
     <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
   </button>
@@ -437,6 +459,9 @@ const ICON_PATHS = {
   close: '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   pin: '<path d="M12 21s-6.5-5.3-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.7 12 21 12 21Z"/><circle cx="12" cy="10.5" r="2.4"/>',
+  // sync-status icons
+  cloudcheck: '<path d="M7 18h10a3.5 3.5 0 0 0 .5-6.97A5 5 0 0 0 8.6 9.2 4 4 0 0 0 7 18Z"/><path d="m9.5 13.5 1.8 1.8 3.2-3.2"/>',
+  cloudoff: '<path d="M3 3l18 18"/><path d="M8.6 9.2A5 5 0 0 1 16.9 11.1 3.5 3.5 0 0 1 18.8 17M15.5 18H7a4 4 0 0 1-1.3-7.8"/>',
 };
 function icon(name, size=24) {
   return `<svg class="ic-svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" `
@@ -550,7 +575,24 @@ function requestLogin(msg) {
       const token = btoa(unescape(encodeURIComponent(u + ':' + p)));
       let r;
       try { r = await fetch('/api/me', { headers: { Authorization: 'Basic ' + token } }); }
-      catch (_) { showErr('Network error — try again.'); return; }
+      catch (_) {
+        // Offline: don't block sign-in. If we have cached data and the name matches
+        // a known member, let them in optimistically; the credentials get validated
+        // on the next online request (a wrong password will re-prompt then).
+        const g = lastGid(), snap = g ? loadSnapshot(g) : null;
+        const mem = snap && snap.members.find(m => (m.name || '').toLowerCase() === u.toLowerCase());
+        if (mem) {
+          authToken = token;
+          me = { member_id: mem.id, name: mem.name, group_id: snap.group.id };
+          localStorage.setItem(AUTH_KEY, token);
+          localStorage.setItem(ME_KEY, JSON.stringify(me));
+          ov.classList.remove('show'); setTimeout(() => ov.remove(), 200);
+          loginInFlight = null; resolve(true);
+          return;
+        }
+        showErr('You’re offline — connect once to sign in the first time.');
+        return;
+      }
       if (r.status === 401) { showErr('Wrong password — try again.'); pass.value = ''; pass.focus(); return; }
       if (r.status === 403) {
         const t = await r.json().catch(() => ({}));
@@ -608,24 +650,259 @@ async function api(method, path, body) {
   return r.json();
 }
 
-async function loadCurrent() {
+// ============================================================================
+//  Offline support — read from a local snapshot, queue writes, sync on reconnect
+// ============================================================================
+// The app stays fully usable with no network: the last server state is cached in
+// localStorage and rendered instantly, writes are applied optimistically and
+// parked in an "outbox", then replayed once the connection returns. Each queued
+// write carries a client_id so the replay is idempotent server-side (exactly-once
+// effect). Balances are recomputed locally — a JS mirror of spliti/balances.py —
+// so offline edits reflect immediately.
+
+const SNAP_PREFIX = 'spliti_snap_';
+const LAST_GID_KEY = 'spliti_last_gid';
+const OUTBOX_KEY = 'spliti_outbox';
+
+const uuid = () => (crypto.randomUUID
+  ? crypto.randomUUID()
+  : 'c-' + Date.now().toString(36) + '-' + Math.random().toString(16).slice(2));
+
+const readOutbox = () => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch (_) { return []; } };
+let outbox = readOutbox();
+const pendingCount = () => outbox.length;
+function saveOutbox() {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox)); } catch (_) {}
+  updateNetBadge();
+}
+// Another instance (a second tab / browser sharing this device) changed the queue:
+// adopt it so we don't overwrite each other's pending writes. Skipped mid-flush to
+// avoid yanking the op we're currently sending.
+window.addEventListener('storage', e => {
+  if (e.key === OUTBOX_KEY && !flushing) { outbox = readOutbox(); updateNetBadge(); }
+});
+
+const snapKey = gid => SNAP_PREFIX + gid;
+function saveSnapshot() {
+  if (!state.detail || !state.current) return;
   try {
-    await ensureAuth();
-    state.detail = await api('GET','/current');
-    state.current = state.detail.group.id;
-  } catch(e) {
-    $('#main').innerHTML = '<div class="empty">Couldn’t load. <a href="#" id="retry">Retry</a></div>';
-    const r = $('#retry');
-    if (r) r.onclick = ev => { ev.preventDefault(); $('#main').innerHTML='<div class="empty">Loading…</div>'; loadCurrent(); };
+    localStorage.setItem(snapKey(state.current), JSON.stringify(state.detail));
+    localStorage.setItem(LAST_GID_KEY, String(state.current));
+  } catch (_) {}
+}
+function loadSnapshot(gid) { try { return JSON.parse(localStorage.getItem(snapKey(gid))); } catch (_) { return null; } }
+const lastGid = () => { const v = localStorage.getItem(LAST_GID_KEY); return v ? +v : null; };
+
+// ---- local balance math (mirror of balances.py) ----
+function splitEqually(amountPaise, ids) {
+  const n = ids.length, base = Math.floor(amountPaise / n), rem = amountPaise - base * n;
+  const out = {}; ids.forEach((id, i) => { out[id] = base + (i < rem ? 1 : 0); });
+  return out;
+}
+function suggestSettlements(bal) {
+  const creditors = Object.entries(bal).map(([m, b]) => [+m, b]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const debtors = Object.entries(bal).map(([m, b]) => [+m, -b]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const out = []; let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const pay = Math.min(debtors[i][1], creditors[j][1]);
+    out.push({ from: debtors[i][0], to: creditors[j][0], amount_paise: pay });
+    debtors[i][1] -= pay; creditors[j][1] -= pay;
+    if (debtors[i][1] === 0) i++;
+    if (creditors[j][1] === 0) j++;
+  }
+  return out;
+}
+function recomputeDetail(d) {
+  const memberIds = d.members.map(m => m.id);
+  const nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  const bal = {}; memberIds.forEach(m => { bal[m] = 0; });
+  d.expenses.filter(e => !e.deleted).forEach(e => {
+    if (e.paid_by in bal) bal[e.paid_by] += e.amount_paise;
+    (e.shares || []).forEach(s => { if (s.member_id in bal) bal[s.member_id] -= s.share_paise; });
+  });
+  d.settlements.forEach(st => {
+    if (st.from_member in bal) bal[st.from_member] += st.amount_paise;
+    if (st.to_member in bal) bal[st.to_member] -= st.amount_paise;
+  });
+  d.balances = memberIds.map(m => ({ member_id: m, name: nameOf[m], net_paise: bal[m] }));
+  d.suggestions = suggestSettlements(bal).map(s => ({ ...s, from_name: nameOf[s.from], to_name: nameOf[s.to] }));
+}
+
+const nowUtc = () => new Date().toISOString().slice(0, 19).replace('T', ' ');  // SQLite-style UTC
+
+// A cheap fingerprint of the data we render, so a periodic background pull only
+// re-renders (and disrupts the open tab) when something actually changed — e.g.
+// another member added an expense.
+function detailSig(d) {
+  if (!d) return '';
+  return JSON.stringify({
+    e: d.expenses.map(x => [x.id, x.amount_paise, x.deleted ? 1 : 0]),
+    s: d.settlements.map(x => [x.id, x.amount_paise]),
+    m: d.members.map(x => [x.id, x.name]),
+  });
+}
+
+// ---- optimistic local mutations (until the server confirms) ----
+function localAddExpense(d, op) {
+  const b = op.body, nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  const amountPaise = Math.round(b.amount * 100);
+  let shareMap;
+  if (b.split_type === 'exact') { shareMap = {}; for (const [m, a] of Object.entries(b.shares)) shareMap[+m] = Math.round(a * 100); }
+  else { shareMap = splitEqually(amountPaise, b.members || d.members.map(m => m.id)); }
+  d.expenses.unshift({
+    id: op.client_id, client_id: op.client_id, description: b.description, amount_paise: amountPaise,
+    paid_by: b.paid_by, paid_by_name: nameOf[b.paid_by],
+    added_by: (me && me.member_id) || null, added_by_name: (me && me.name) || null,
+    created_at: nowUtc(), deleted: false, deleted_at: null, pending: true,
+    shares: Object.entries(shareMap).map(([m, c]) => ({ member_id: +m, name: nameOf[+m], share_paise: c })),
+  });
+  recomputeDetail(d);
+}
+function localAddSettlement(d, op) {
+  const b = op.body, nameOf = {}; d.members.forEach(m => { nameOf[m.id] = m.name; });
+  d.settlements.unshift({
+    id: op.client_id, client_id: op.client_id, from_member: b.from_member, to_member: b.to_member,
+    from_name: nameOf[b.from_member], to_name: nameOf[b.to_member],
+    amount_paise: Math.round(b.amount * 100), created_at: nowUtc(), pending: true,
+  });
+  recomputeDetail(d);
+}
+function localSetDeleted(d, eid, deleted) {
+  const e = d.expenses.find(x => String(x.id) === String(eid));
+  if (e) { e.deleted = deleted; e.deleted_at = deleted ? nowUtc() : null; recomputeDetail(d); }
+}
+
+// Queue a write: apply locally, persist, re-render, then try to push it.
+function queueMutation(op, applyFn) {
+  op.client_id = op.client_id || uuid();
+  if (op.body) op.body.client_id = op.client_id;   // server-side dedup key
+  applyFn(state.detail, op);
+  saveSnapshot();
+  // Re-read first so a write queued by another instance isn't clobbered when we
+  // persist (the in-memory copy may be stale). Not done mid-flush.
+  if (!flushing) outbox = readOutbox();
+  outbox.push(op); saveOutbox();
+  renderMain();
+  flush();
+}
+
+// ---- sync engine ----
+function specForOp(op) {
+  if (op.kind === 'expense') return ['POST', '/groups/' + op.gid + '/expenses', op.body];
+  if (op.kind === 'settlement') return ['POST', '/groups/' + op.gid + '/settlements', op.body];
+  if (op.kind === 'delete') return ['DELETE', '/groups/' + op.gid + '/expenses/' + op.eid, undefined];
+  if (op.kind === 'restore') return ['POST', '/groups/' + op.gid + '/expenses/' + op.eid + '/restore', undefined];
+  return null;
+}
+async function sendOp(op) {
+  const spec = specForOp(op); if (!spec) return;
+  const [method, path, body] = spec;
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  let r;
+  try { r = await fetchAuthed('/api' + path, opt); }
+  catch (_) { const e = new Error('offline'); e.retriable = true; throw e; }   // network down — retry later
+  if (r.ok || r.status === 404) return;  // 404 = row already gone; treat as applied
+  const t = await r.json().catch(() => ({}));
+  const e = new Error(t.detail || ('HTTP ' + r.status));
+  // 5xx / server failure is transient: keep the write queued and retry — never drop it.
+  // Only a genuine client rejection (4xx) is permanent and safe to discard.
+  e.retriable = r.status >= 500;
+  throw e;
+}
+
+let flushing = false;
+async function flush() {
+  if (flushing || !navigator.onLine) { updateNetBadge(); return; }
+  flushing = true;
+  try {
+    while (outbox.length && navigator.onLine) {
+      const op = outbox[0];
+      try { await sendOp(op); }
+      catch (e) {
+        // Transient (offline / 5xx): stop and keep the whole queue intact so no
+        // write is ever lost — we retry on the next online event or load.
+        if (e.retriable) break;
+        // Permanent client rejection (4xx): drop just this op so it can't wedge
+        // the queue forever; the rest still sync.
+        console.warn('[sync] dropping rejected write', op, e.message);
+        toast('A queued change was rejected: ' + e.message);
+      }
+      outbox.shift(); saveOutbox();
+    }
+    // Caught up and online: pull canonical server state (real ids, timestamps,
+    // and anything other members added). Only re-render when it actually changed,
+    // so the periodic background pull doesn't disrupt the open tab.
+    if (!outbox.length && navigator.onLine && state.current) {
+      try {
+        const fresh = await api('GET', '/current');
+        const changed = detailSig(fresh) !== detailSig(state.detail);
+        state.detail = fresh; state.current = fresh.group.id;
+        saveSnapshot();
+        if (changed) { delete state.overview[state.current]; renderMain(); }
+      } catch (_) { /* connection dropped again — keep showing optimistic state */ }
+    }
+  } finally { flushing = false; updateNetBadge(); }
+}
+
+// ---- sync-status icon in the header ----
+// ok = everything synced · busy = syncing/queued (online) · off = offline (changes
+// are saved locally and will sync when the connection returns).
+function updateNetBadge() {
+  const el = $('#netBadge'); if (!el) return;
+  const off = !navigator.onLine, pend = pendingCount();
+  let cls, ic, spin = false, title;
+  if (off) {
+    cls = 'off'; ic = 'cloudoff';
+    title = pend ? `Offline — ${pend} change${pend > 1 ? 's' : ''} saved on this device` : 'Offline — showing saved data';
+  } else if (pend || flushing) {
+    cls = 'busy'; ic = 'refresh'; spin = true;
+    title = pend ? `Syncing ${pend} change${pend > 1 ? 's' : ''}…` : 'Syncing…';
+  } else {
+    cls = 'ok'; ic = 'cloudcheck'; title = 'All changes synced';
+  }
+  el.className = 'syncbtn ' + cls;
+  el.title = title; el.setAttribute('aria-label', title);
+  el.innerHTML = icon(ic, 19) + (off && pend ? `<span class="cnt">${pend}</span>` : '');
+  if (spin) el.querySelector('.ic-svg')?.classList.add('spin');
+}
+window.addEventListener('online', () => {
+  updateNetBadge();
+  // Drop offline AI placeholders so the summary regenerates when next viewed.
+  Object.keys(state.overview).forEach(g => { if (state.overview[g] && state.overview[g].offline) delete state.overview[g]; });
+  flush();
+  if (activeTab === 'overview' && state.current) ensureOverview(state.current);
+});
+window.addEventListener('offline', updateNetBadge);
+
+async function loadCurrent() {
+  const gid = (me && me.group_id) || lastGid();
+  const snap = gid ? loadSnapshot(gid) : null;
+
+  // Returning user with cached identity + data: render instantly, never block on
+  // the network or a login prompt. Then sync in the background.
+  if (authToken && me && snap) {
+    state.detail = snap; state.current = snap.group.id;
+    recomputeDetail(state.detail);
+    renderMain();
+    flush();
     return;
   }
-  renderMain();
-}
-async function refresh() {
-  if (!state.current) return;
-  state.detail = await api('GET','/groups/'+state.current);
-  delete state.overview[state.current];  // expenses changed -> overview is stale
-  renderMain();
+
+  // First run / no cache: we need the network. Fall back to any snapshot if offline.
+  try {
+    await ensureAuth();
+    state.detail = await api('GET', '/current');
+    state.current = state.detail.group.id;
+    saveSnapshot();
+    renderMain();
+    flush();
+  } catch (e) {
+    if (snap) { state.detail = snap; state.current = snap.group.id; recomputeDetail(state.detail); renderMain(); return; }
+    $('#main').innerHTML = '<div class="empty">Couldn’t load. <a href="#" id="retry">Retry</a></div>';
+    const r = $('#retry');
+    if (r) r.onclick = ev => { ev.preventDefault(); $('#main').innerHTML = '<div class="empty">Loading…</div>'; loadCurrent(); };
+  }
 }
 
 function esc(s){ return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -703,10 +980,11 @@ function settlementModal(d) {
     const errEl = ov.querySelector('#stErr'); errEl.textContent = '';
     if (from === to) { errEl.textContent = 'Payer and receiver must differ.'; return; }
     if (!(amt > 0)) { errEl.textContent = 'Enter a valid amount.'; return; }
-    try {
-      await api('POST', '/groups/'+d.group.id+'/settlements', { from_member: from, to_member: to, amount: amt });
-      close(); toast('Settlement recorded'); await refresh();
-    } catch(e) { errEl.textContent = e.message; }
+    queueMutation(
+      { kind: 'settlement', gid: d.group.id, body: { from_member: from, to_member: to, amount: amt } },
+      localAddSettlement,
+    );
+    close(); toast('Settlement recorded');
   };
 }
 
@@ -889,7 +1167,7 @@ function balanceSection(d) {
         </div>`).join('') : '<div class="muted">Nothing yet.</div>'}
     </div>
     <div class="card">
-      <div class="overview-head"><h2>Settle up</h2><button class="sm" id="manualSettle">Manual Settlement</button></div>
+      <div class="overview-head"><h2>Settle up</h2><button class="ghost pill-btn" id="manualSettle">Manual settlement</button></div>
       <p class="hint-line">Fewest transfers to settle up — settle offline.</p>
       ${d.suggestions.length ? d.suggestions.map(s=>`
         <div class="sug">
@@ -904,7 +1182,7 @@ function expRow(e) {
     <div class="exp clickable ${e.deleted?'deleted':''}" data-exp="${e.id}">
       <div class="exp-main">${avatar(e.paid_by_name)}
         <div><div class="exp-desc">${esc(e.description)}</div>
-          <div class="meta">${esc(e.paid_by_name)}${e.added_by_name && e.added_by !== e.paid_by ? ` · added by ${esc(e.added_by_name)}` : ''} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}</div></div></div>
+          <div class="meta">${esc(e.paid_by_name)}${e.added_by_name && e.added_by !== e.paid_by ? ` · added by ${esc(e.added_by_name)}` : ''} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}${e.pending?' · ⏳ not synced':''}</div></div></div>
       <div class="exp-right">
         <span class="amt">${fmt(e.amount_paise)}</span>
         ${e.deleted
@@ -935,7 +1213,7 @@ function historySection(d) {
         <div class="exp">
           <div class="exp-main">${avatar(s.from_name)}
             <div><div class="exp-desc">${esc(s.from_name)} <span class="arrow">→</span> ${esc(s.to_name)}</div>
-              <div class="meta">settlement · ${fmtDate(s.created_at)}</div></div></div>
+              <div class="meta">settlement · ${fmtDate(s.created_at)}${s.pending?' · ⏳ not synced':''}</div></div></div>
           <span class="amt">${fmt(s.amount_paise)}</span>
         </div>`).join('')}
     </div>` : ''}`;
@@ -1092,18 +1370,31 @@ function wireTab() {
       if (!await confirmAction({ title:'Delete expense?',
         message:'It will be struck through and kept in history — you can undo it later.',
         ok:'Delete', danger:true })) return;
-      await api('DELETE','/groups/'+d.group.id+'/expenses/'+b.dataset.del);
-      toast('Expense deleted'); await refresh();
+      const eid = b.dataset.del;
+      const exp = d.expenses.find(x => String(x.id) === String(eid));
+      // Never synced yet: drop the queued add and remove it locally — there's no
+      // server row to delete, so we don't enqueue a delete for a phantom id.
+      if (exp && exp.pending) {
+        outbox = outbox.filter(o => !(o.kind === 'expense' && o.client_id === exp.client_id));
+        saveOutbox();
+        d.expenses = d.expenses.filter(x => x !== exp);
+        recomputeDetail(d); saveSnapshot(); renderMain();
+        toast('Expense removed');
+        return;
+      }
+      queueMutation({ kind: 'delete', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, true));
+      toast('Expense deleted');
     });
     $('#tabbody').querySelectorAll('[data-undel]').forEach(b => b.onclick = async () => {
       if (!await confirmAction({ title:'Restore expense?',
         message:'This expense will count toward balances again.', ok:'Restore' })) return;
-      await api('POST','/groups/'+d.group.id+'/expenses/'+b.dataset.undel+'/restore');
-      toast('Expense restored'); await refresh();
+      const eid = b.dataset.undel;
+      queueMutation({ kind: 'restore', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, false));
+      toast('Expense restored');
     });
     $('#tabbody').querySelectorAll('[data-exp]').forEach(row => row.onclick = ev => {
       if (ev.target.closest('button')) return;  // let delete/undo buttons work
-      const e = d.expenses.find(x => x.id === +row.dataset.exp);
+      const e = d.expenses.find(x => String(x.id) === String(row.dataset.exp));  // ids may be uuids (pending) or ints
       if (e) expenseModal(e);
     });
   }
@@ -1136,6 +1427,13 @@ function renderOverviewBox() {
 async function ensureOverview(gid) {
   const ov = state.overview[gid];
   if (ov && (ov.text || ov.loading)) { renderOverviewBox(); return; }
+  // AI needs the network — don't try (and don't cache) when offline; the user can
+  // tap refresh once back online.
+  if (!navigator.onLine) {
+    state.overview[gid] = { text: '_The trip summary needs a connection — it’ll be back online._', loading: false, offline: true };
+    renderOverviewBox();
+    return;
+  }
   state.overview[gid] = { text: '', loading: true };
   renderOverviewBox();
   try {
@@ -1205,6 +1503,15 @@ async function sendChat(q) {
   q = (q||'').trim(); if (!q || chatBusy) return;
   const gid = state.current;
   const hist = state.chats[gid] || (state.chats[gid] = []);
+  // The chat is AI-backed, so it needs the network. Offline, answer locally with a
+  // friendly note instead of a failed request.
+  if (!navigator.onLine) {
+    $('#chatQ').value = '';
+    hist.push({ role: 'user', content: q });
+    hist.push({ role: 'assistant', content: 'I need an internet connection to answer — your balances and history still work offline, though.' });
+    renderChat();
+    return;
+  }
   const priorTurns = hist.map(m => ({role:m.role, content:m.content}));
   $('#chatQ').value = '';
   hist.push({role:'user', content:q});
@@ -1244,8 +1551,11 @@ async function addExpense() {
     const t = Math.round(amount*100), s = exactSumPaise();
     if (s !== t) { err.textContent = `Splits total ${fmt(s)} — must equal ${fmt(t)}.`; return; }
   }
-  try { await api('POST','/groups/'+d.group.id+'/expenses',body); await refresh(); closeExpenseModal(); expenseAddedModal(); }
-  catch(e){ err.textContent = e.message; }
+  // Apply optimistically + queue for sync. Works identically on- and offline:
+  // online, flush() pushes it right away; offline, it waits in the outbox.
+  queueMutation({ kind: 'expense', gid: d.group.id, body }, localAddExpense);
+  closeExpenseModal();
+  expenseAddedModal();
 }
 
 let mermaidMod = null, chartSeq = 0;
@@ -1345,7 +1655,16 @@ function expenseAddedModal() {
   ov.onclick = e => { if (e.target === ov) close(); };
 }
 
+updateNetBadge();
+$('#netBadge').onclick = () => { if (navigator.onLine) flush(); else toast('Offline — your changes are saved and will sync automatically.'); };
 loadCurrent();
+
+// Background sync: periodically retry the outbox and pull in anything other
+// members added. flush() is a no-op offline and guards against overlap, so this
+// is safe to fire on a timer, on regaining focus, and on reconnect.
+const SYNC_INTERVAL_MS = 20000;
+setInterval(() => { if (state.current) flush(); }, SYNC_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.current) flush(); });
 
 // Register the service worker so the app is installable / works standalone.
 if ('serviceWorker' in navigator) {
