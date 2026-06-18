@@ -8,6 +8,7 @@ import csv
 import io
 import secrets
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
@@ -61,12 +62,22 @@ def detect_category(description: str) -> str:
             return cat_id
     return "other"
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # On startup, back-fill the Firestore mirror with all existing groups so the
+    # cloud copy converges to local state on load (not just on the next write).
+    # Off-thread and best-effort; a no-op when the mirror is disabled.
+    firestore_sync.start_initial_sync()
+    yield
+
+
 split_app = FastAPI(
     title="split",
     description="A Splitwise-style expense splitter",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=_lifespan,
 )
 # auto_error=False so a missing/invalid header doesn't auto-respond with
 # `WWW-Authenticate: Basic`. That header makes browsers (notably iOS PWAs) pop

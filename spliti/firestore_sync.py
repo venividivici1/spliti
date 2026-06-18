@@ -18,9 +18,9 @@ Design notes:
     untouched.
 
 Firestore layout (collection / document):
-    groups/{gid}
+    spliti/{gid}                       # one document per group (group metadata)
       ├─ members/{member_id}
-      ├─ expenses/{expense_id}      # includes soft-delete flag + embedded shares
+      ├─ expenses/{expense_id}         # includes soft-delete flag + embedded shares
       └─ settlements/{settlement_id}
 """
 
@@ -30,7 +30,7 @@ from spliti import db
 from spliti.config import get_settings
 
 # Top-level collection holding one document per group.
-COLLECTION = "groups"
+COLLECTION = "spliti"
 
 # Firestore caps a single batched write at 500 operations; stay comfortably
 # under it and commit in chunks so a large group still mirrors in one pass.
@@ -178,6 +178,41 @@ def mirror_group(gid: int) -> None:
     except Exception:
         # Runs after the response in a BackgroundTask: never raise into the worker.
         pass
+
+
+def mirror_all_groups() -> None:
+    """Back-fill the mirror with every existing group (initial sync on startup).
+
+    Lets the cloud copy converge to the full local state the first time the
+    mirror is enabled, instead of waiting for each group's next write. No-op when
+    disabled; best-effort so startup never fails on a Firestore error."""
+    if not is_configured():
+        return
+    try:
+        conn = db.connect()
+        try:
+            gids = [r["id"] for r in conn.execute("SELECT id FROM groups ORDER BY id")]
+        finally:
+            conn.close()
+    except Exception:
+        return
+    for gid in gids:
+        mirror_group(gid)  # already best-effort + idempotent per group
+
+
+def start_initial_sync() -> None:
+    """Run mirror_all_groups off the request/startup path so it never blocks.
+
+    Called when the app starts serving. Spawns a daemon thread (so a slow or
+    failing initial sync can't delay startup or shutdown) only when the mirror is
+    configured; otherwise it's a no-op."""
+    if not is_configured():
+        return
+    import threading
+
+    threading.Thread(
+        target=mirror_all_groups, name="firestore-initial-sync", daemon=True
+    ).start()
 
 
 def delete_group(gid: int) -> None:
