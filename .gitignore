@@ -17,3 +17,4 @@ spliti/*.db
 .coverage
 htmlcov/
 *.egg-info/
+vapid_private.pem
