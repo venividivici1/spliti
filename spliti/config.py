@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # same way chat degrades without a Mistral key. Generate a pair with
     # `python scripts/gen_vapid.py`. The private key is a secret; the public
     # (application server) key is handed to the browser to subscribe.
+    # vapid_private_key may be the PEM text itself or a path to a .pem file — a
+    # path is safer, since a multi-line PEM in an env var is easily mangled.
     vapid_private_key: str = ""
     vapid_public_key: str = ""
     vapid_subject: str = "mailto:admin@example.com"
