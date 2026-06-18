@@ -379,6 +379,22 @@
   .exp-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
   .exp-main > div { min-width: 0; }
   .exp-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .exp-cat { margin-right: 4px; }
+
+  /* ---- category chips ---- */
+  .cat-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .cat-chip { background: var(--chip); border: 1px solid var(--line); border-radius: 20px;
+    padding: 5px 10px; font-size: 13px; cursor: pointer; transition: all 0.15s ease;
+    display: flex; align-items: center; gap: 4px; min-height: 0; color: var(--muted); }
+  .cat-chip:hover { border-color: var(--accent); color: var(--text); }
+  .cat-chip.on { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
+  .cat-chip .cat-emoji { font-size: 15px; }
+
+  /* ---- category breakdown ---- */
+  .cat-breakdown { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .cat-stat { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; }
+  .cat-stat .cat-emoji { font-size: 15px; }
+  .cat-stat .cat-pct { color: var(--muted); font-size: 12px; }
   .exp-right { display: flex; align-items: center; gap: 10px; flex: none; }
 
   /* ---- balance rows with bars ---- */
@@ -460,6 +476,30 @@ function applyTheme(theme) {
 document.getElementById('themeToggle').addEventListener('click', () => {
   applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 });
+
+// ---- expense categories ----
+const CATEGORIES = {
+  chai:       { emoji: '🍵', label: 'Chai & Snacks', keywords: ['chai','tea','coffee','maggi','snacks','biscuit','chips','namkeen','samosa','pakora'] },
+  meals:      { emoji: '🍽️', label: 'Meals', keywords: ['breakfast','lunch','dinner','dhaba','thali','momo','food','biryani','dal','roti','paratha'] },
+  fuel:       { emoji: '⛽', label: 'Fuel', keywords: ['fuel','petrol','diesel','gas','filling'] },
+  stay:       { emoji: '🏨', label: 'Stay', keywords: ['hotel','homestay','camp','tent','room','lodge','hostel','airbnb','resort','night stay'] },
+  transport:  { emoji: '🚗', label: 'Transport', keywords: ['toll','parking','cab','taxi','bus','auto','rickshaw','bike','rental','ola','uber'] },
+  activities: { emoji: '🎒', label: 'Activities', keywords: ['trek','rafting','ticket','entry','permit','paragliding','camping','safari','museum','temple'] },
+  shopping:   { emoji: '🛒', label: 'Shopping', keywords: ['shopping','souvenir','clothes','gift','market','handicraft'] },
+  essentials: { emoji: '💊', label: 'Essentials', keywords: ['medicine','pharmacy','recharge','sim','atm','laundry','repair','puncture','mechanic'] },
+  drinks:     { emoji: '🍺', label: 'Drinks', keywords: ['beer','wine','whisky','rum','alcohol','bar','pub','old monk'] },
+  tips:       { emoji: '💡', label: 'Tips & Misc', keywords: ['tip','donation','guide','porter'] },
+  other:      { emoji: '📦', label: 'Other', keywords: [] },
+};
+function detectCategory(desc) {
+  const lower = desc.toLowerCase();
+  for (const [id, cat] of Object.entries(CATEGORIES)) {
+    if (id === 'other') continue;
+    if (cat.keywords.some(kw => lower.includes(kw))) return id;
+  }
+  return 'other';
+}
+function catEmoji(cat) { return (CATEGORIES[cat] || CATEGORIES.other).emoji; }
 
 // ---- crisp inline SVG icons (FontAwesome/Lucide style, inherit currentColor) ----
 const ICON_PATHS = {
@@ -1070,11 +1110,29 @@ function overviewSection() {
   const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   const spentToday = active.filter(e => istDateKey(e.created_at) === todayKey)
     .reduce((s, e) => s + e.amount_paise, 0);
+
+  // Category breakdown
+  const byCat = {};
+  active.forEach(e => {
+    const cat = e.category || 'other';
+    byCat[cat] = (byCat[cat] || 0) + e.amount_paise;
+  });
+  const catBreakdown = Object.entries(byCat)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, amt]) => {
+      const pct = total > 0 ? Math.round(amt / total * 100) : 0;
+      return `<div class="cat-stat"><span class="cat-emoji">${catEmoji(cat)}</span>${fmt(amt)} <span class="cat-pct">(${pct}%)</span></div>`;
+    }).join('');
+
   return `
     <div class="card stats">
       <div class="stat"><div class="stat-v" data-count="${total}">${fmt(0)}</div><div class="stat-l">Total spent</div></div>
       <div class="stat"><div class="stat-v" data-count="${spentToday}">${fmt(0)}</div><div class="stat-l">Spent today</div></div>
     </div>
+    ${active.length ? `<div class="card">
+      <h2>Spending by category</h2>
+      <div class="cat-breakdown">${catBreakdown}</div>
+    </div>` : ''}
     <div class="card">
       <h2>The crew</h2>
       <div class="crew">${d.members.map(m=>`
@@ -1105,12 +1163,18 @@ function overviewSection() {
 
 function expenseFormHtml(d) {
   const memberOpts = d.members.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
+  const catChips = Object.entries(CATEGORIES).map(([id, c]) =>
+    `<button type="button" class="cat-chip${id==='other'?' on':''}" data-cat="${id}"><span class="cat-emoji">${c.emoji}</span>${c.label}</button>`
+  ).join('');
   return `
     <div class="fields exp-fields" style="margin-bottom:12px">
       <div><label>Description</label><input id="eDesc" placeholder="Dinner" /></div>
       <div><label>Amount</label><div class="amount-field"><span class="cur">₹</span><input id="eAmt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" /></div></div>
       <div><label>Paid by</label><select id="ePaidBy">${memberOpts}</select></div>
     </div>
+    <label>Category</label>
+    <div class="cat-chips" id="catChips">${catChips}</div>
+    <input type="hidden" id="eCat" value="other" />
     <label>Split</label>
     <div class="seg" id="seg" style="margin-bottom:10px">
       <button data-t="equal" class="${splitType==='equal'?'on':''}">Equally</button>
@@ -1163,6 +1227,24 @@ function wireExpenseForm(d) {
     $('#seg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
     renderSplitArea();
   });
+  // Category chips
+  const catChips = $('#catChips');
+  function selectCat(catId) {
+    $('#eCat').value = catId;
+    catChips.querySelectorAll('.cat-chip').forEach(c => c.classList.toggle('on', c.dataset.cat === catId));
+  }
+  catChips.querySelectorAll('.cat-chip').forEach(c => c.onclick = () => selectCat(c.dataset.cat));
+  // Auto-detect category from description
+  let userPickedCat = false;
+  catChips.querySelectorAll('.cat-chip').forEach(c => {
+    const orig = c.onclick;
+    c.onclick = () => { userPickedCat = true; selectCat(c.dataset.cat); };
+  });
+  $('#eDesc').addEventListener('input', () => {
+    if (userPickedCat) return;
+    const detected = detectCategory($('#eDesc').value);
+    selectCat(detected);
+  });
   $('#addExpense').onclick = addExpense;
   $('#eAmt').addEventListener('input', () => { if (splitType === 'exact') renderSplitArea(); });
   $('#eDesc').focus();
@@ -1200,7 +1282,7 @@ function expRow(e) {
   return `
     <div class="exp clickable ${e.deleted?'deleted':''}" data-exp="${e.id}">
       <div class="exp-main">${avatar(e.paid_by_name)}
-        <div><div class="exp-desc">${esc(e.description)}</div>
+        <div><div class="exp-desc"><span class="exp-cat">${catEmoji(e.category)}</span>${esc(e.description)}</div>
           <div class="meta">${esc(e.paid_by_name)}${e.added_by_name && e.added_by !== e.paid_by ? ` · added by ${esc(e.added_by_name)}` : ''} · ${fmtTime(e.created_at)}${e.deleted?' · deleted':''}${e.pending?' · ⏳ not synced':''}</div></div></div>
       <div class="exp-right">
         <span class="amt">${fmt(e.amount_paise)}</span>
@@ -1220,7 +1302,7 @@ function historySection(d) {
   });
   return `
     <div class="card">
-      <h2>History</h2>
+      <div class="overview-head"><h2>History</h2>${d.expenses.length ? `<button class="ghost sm" id="exportCsv">⬇ Export CSV</button>` : ''}</div>
       ${d.expenses.length ? groups.map(([k, items]) =>
         `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
       ).join('') : '<div class="muted">No expenses yet. Tap the ➕ button to add one.</div>'}
@@ -1385,6 +1467,17 @@ function wireTab() {
     $('#chatSuggest').querySelectorAll('button').forEach(b => b.onclick = () => sendChat(b.dataset.q));
   }
   if (activeTab === 'history') {
+    const csvBtn = $('#exportCsv');
+    if (csvBtn) csvBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = `/api/groups/${d.group.id}/export/csv`;
+      a.download = '';
+      // Add auth header via fetch, then trigger download
+      fetch(a.href, { headers: { 'Authorization': 'Basic ' + authToken } })
+        .then(r => r.blob())
+        .then(blob => { a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href); })
+        .catch(() => toast('Export failed'));
+    };
     $('#tabbody').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (!await confirmAction({ title:'Delete expense?',
         message:'It will be struck through and kept in history — you can undo it later.',
@@ -1560,7 +1653,7 @@ async function addExpense() {
   const paid_by = +$('#ePaidBy').value;
   localStorage.setItem('split.paidBy.' + d.group.id, String(paid_by));
   if (!description || !(amount>0)) { err.textContent='Enter a description and amount.'; return; }
-  const body = { description, amount, paid_by, split_type: splitType };
+  const body = { description, amount, paid_by, split_type: splitType, category: $('#eCat').value };
   if (splitType==='equal') {
     body.members = [...document.querySelectorAll('.pp:checked')].map(c=>+c.value);
     if (!body.members.length) { err.textContent='Pick at least one person.'; return; }
