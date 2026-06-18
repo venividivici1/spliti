@@ -187,7 +187,10 @@ async def suggest_category(description: str, catalog: list[dict]) -> str | None:
     content = resp.choices[0].message.content if resp.choices else ""
     if isinstance(content, list):
         content = "".join(getattr(c, "text", "") for c in content)
-    cat = (content or "").strip().strip('."\'').lower().split()[0] if content else ""
+    # First token, lowercased; tolerate a whitespace-only reply (empty split) and
+    # a stray trailing colon if the model echoes "id: label" despite the prompt.
+    parts = (content or "").strip().strip('."\'').lower().split()
+    cat = parts[0].rstrip(":") if parts else ""
     valid = {c["id"] for c in catalog}
     result = cat if cat in valid else None
     if len(_CAT_CACHE) < _CAT_CACHE_MAX:
