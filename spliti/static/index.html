@@ -1423,7 +1423,7 @@ async function ensureOverview(gid) {
   // AI needs the network — don't try (and don't cache) when offline; the user can
   // tap refresh once back online.
   if (!navigator.onLine) {
-    state.overview[gid] = { text: '_The trip summary needs a connection — it’ll be back online._', loading: false, offline: true };
+    state.overview[gid] = { text: '*The trip summary needs a connection — it’ll be back online.*', loading: false, offline: true };
     renderOverviewBox();
     return;
   }
