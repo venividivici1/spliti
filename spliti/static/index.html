@@ -288,6 +288,15 @@
   .notif-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
   .notif-cats.dim { opacity: 0.45; pointer-events: none; }
   .notif-lead { font-weight: 600; }
+  /* link to the standalone /health dashboard, shown below the notif rows */
+  .settings-link { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--panel2); color: var(--text);
+    text-decoration: none; font-size: 14px; }
+  .settings-link:hover { color: var(--accent); background: var(--hover-highlight); }
+  .settings-link .sl-label { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .settings-link svg { width: 18px; height: 18px; flex: none; }
+  .settings-link .sl-chev { opacity: 0.5; font-size: 18px; }
   button.danger:hover { background: #e0566f; color: #fff; }
   .modal.success { text-align: center; }
   .modal.success .modal-title { font-size: 19px; margin-bottom: 16px; }
@@ -452,11 +461,6 @@
   .cat-chip.on { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
   .cat-chip .cat-emoji { font-size: 15px; }
 
-  /* ---- category breakdown ---- */
-  .cat-breakdown { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .cat-stat { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; }
-  .cat-stat .cat-emoji { font-size: 15px; }
-  .cat-stat .cat-pct { color: var(--muted); font-size: 12px; }
   .exp-right { display: flex; align-items: center; gap: 10px; flex: none; }
 
   /* ---- balance rows with bars ---- */
@@ -1176,28 +1180,11 @@ function overviewSection() {
   const spentToday = active.filter(e => istDateKey(e.created_at) === todayKey)
     .reduce((s, e) => s + e.amount_paise, 0);
 
-  // Category breakdown
-  const byCat = {};
-  active.forEach(e => {
-    const cat = e.category || 'other';
-    byCat[cat] = (byCat[cat] || 0) + e.amount_paise;
-  });
-  const catBreakdown = Object.entries(byCat)
-    .sort((a, b) => b[1] - a[1])
-    .map(([cat, amt]) => {
-      const pct = total > 0 ? Math.round(amt / total * 100) : 0;
-      return `<div class="cat-stat"><span class="cat-emoji">${catEmoji(cat)}</span>${fmt(amt)} <span class="cat-pct">(${pct}%)</span></div>`;
-    }).join('');
-
   return `
     <div class="card stats">
       <div class="stat"><div class="stat-v" data-count="${total}">${fmt(0)}</div><div class="stat-l">Total spent</div></div>
       <div class="stat"><div class="stat-v" data-count="${spentToday}">${fmt(0)}</div><div class="stat-l">Spent today</div></div>
     </div>
-    ${active.length ? `<div class="card">
-      <h2>Spending by category</h2>
-      <div class="cat-breakdown">${catBreakdown}</div>
-    </div>` : ''}
     <div class="card">
       <h2>The crew</h2>
       <div class="crew">${d.members.map(m=>`
@@ -1305,11 +1292,36 @@ function wireExpenseForm(d) {
     const orig = c.onclick;
     c.onclick = () => { userPickedCat = true; selectCat(c.dataset.cat); };
   });
-  $('#eDesc').addEventListener('input', () => {
+  let catSuggestTimer = null;
+  const catCache = new Map();   // desc(lowercased) -> category; avoids repeat LLM lookups
+  async function suggestCatFromBackend(desc) {
+    // Only reached when local keyword matching gave up ("other"). Ask the server,
+    // which falls back to the AI classifier constrained to our category list.
+    try {
+      const r = await fetch(`/api/suggest-category?description=${encodeURIComponent(desc)}`);
+      if (!r.ok) return;
+      const { category } = await r.json();
+      if (category) catCache.set(desc.trim().toLowerCase(), category);
+      // Bail if the user has since picked a chip or changed the description.
+      if (userPickedCat || $('#eDesc').value !== desc) return;
+      if (category) selectCat(category);
+    } catch (_) { /* best-effort — keep the local result */ }
+  }
+  // Shared by typing and by AI autofill: keyword-match instantly, and only when
+  // that gives up do we debounce a single backend (LLM) call — reusing any cached
+  // answer for the same text so we never ask twice.
+  function detectCat(desc) {
     if (userPickedCat) return;
-    const detected = detectCategory($('#eDesc').value);
+    const detected = detectCategory(desc);
     selectCat(detected);
-  });
+    clearTimeout(catSuggestTimer);
+    if (detected !== 'other' || !desc.trim()) return;
+    const key = desc.trim().toLowerCase();
+    if (catCache.has(key)) { selectCat(catCache.get(key)); return; }
+    catSuggestTimer = setTimeout(() => suggestCatFromBackend(desc), 600);
+  }
+  autoDetectCategory = detectCat;   // let fillDescSuggestion categorize its autofill
+  $('#eDesc').addEventListener('input', () => detectCat($('#eDesc').value));
   $('#addExpense').onclick = addExpense;
   $('#eAmt').addEventListener('input', () => { if (splitType === 'exact') renderSplitArea(); });
   $('#eDesc').focus();
@@ -1653,6 +1665,10 @@ function showLocChip() {
 function showLocLoading() { setLocChip('<span class="loc-spin"></span> Locating…', 'loading'); }
 const shortPlace = p => (p || '').split(',')[0].trim();
 
+// Set by the expense-form wiring; lets the AI description autofill below run its
+// text through the same keyword + LLM category detection a user keystroke would.
+let autoDetectCategory = null;
+
 async function fillDescSuggestion() {
   const desc = $('#eDesc');
   if (!desc || desc.value) return;
@@ -1669,6 +1685,7 @@ async function fillDescSuggestion() {
     desc.value = lastSet;
     desc.classList.add('suggested');
     desc.addEventListener('focus', () => desc.classList.remove('suggested'), { once: true });
+    if (autoDetectCategory) autoDetectCategory(lastSet);   // categorize the autofilled text
   };
 
   // 1) Fast: time-of-day suggestion, no location, no blocking.
@@ -2181,6 +2198,15 @@ function settingsModal() {
   ov.innerHTML = `<div class="modal">
     <div class="modal-title">Notifications</div>
     <div id="setBody" class="modal-msg" style="margin-bottom:14px">Loading…</div>
+    <a class="settings-link" href="/health">
+      <span class="sl-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        System health
+      </span>
+      <span class="sl-chev" aria-hidden="true">›</span>
+    </a>
     <div class="modal-actions"><button data-act="ok">Done</button></div>
   </div>`;
   document.body.appendChild(ov);
