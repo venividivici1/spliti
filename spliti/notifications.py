@@ -133,11 +133,13 @@ def _build_payload(event_type: str, category: str, summary: dict, net_paise: int
         verb = "restored" if summary.get("restored") else "deleted"
         ctx = f"{summary['actor_name']} {verb} “{summary['description']}”"
 
-    body = f"{ctx}. {_balance_line(net_paise)}." if category == "balance" else ctx
+    # The event itself is the notification title — no static "Spliti" heading, since
+    # the OS already shows the app name. The balance line, when relevant, is the body.
+    body = _balance_line(net_paise) if category == "balance" else ""
     # A tag unique to the event so distinct events stack instead of overwriting each
     # other in the tray (a constant tag collapses a burst into a single banner).
     tag = f"spliti-{event_type}-{summary.get('event_id', '')}"
-    return {"title": "Spliti", "body": body, "url": "/", "tag": tag}
+    return {"title": ctx, "body": body, "url": "/", "tag": tag}
 
 
 def _choose_category(prefs: dict, event_type: str, affected: bool) -> str | None:

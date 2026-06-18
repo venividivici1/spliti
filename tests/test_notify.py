@@ -145,8 +145,9 @@ def test_generic_message_when_balance_pref_off_but_new_expense_on(client, sent):
         json={"description": "Cab", "amount": 10, "paid_by": ids["Ada"]},
         auth=AUTH,
     )
-    body = sent[0]["payload"]["body"]
-    assert "Cab" in body and "You owe" not in body  # generic, not the balance line
+    payload = sent[0]["payload"]
+    # generic: the event is the title, no balance line in the body
+    assert "Cab" in payload["title"] and "You owe" not in payload["body"]
 
 
 def test_settlement_notifies_counterparty(client, sent):
@@ -170,7 +171,7 @@ def test_delete_notifies_participants(client, sent):
     ).json()["id"]
     sent.clear()
     client.delete(f"/api/groups/{gid}/expenses/{eid}", auth=AUTH)
-    assert sent and "deleted" in sent[0]["payload"]["body"]
+    assert sent and "deleted" in sent[0]["payload"]["title"]
 
 
 def test_stale_subscription_is_pruned(client, sent, monkeypatch):
