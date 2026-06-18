@@ -1562,9 +1562,34 @@ let mermaidMod = null, chartSeq = 0;
 async function getMermaid() {
   if (!mermaidMod) {
     mermaidMod = (await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs')).default;
-    mermaidMod.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
   }
   return mermaidMod;
+}
+// Build mermaid config from the live theme so the pie text contrasts with the
+// modal — a fixed 'dark' theme rendered near-white text that was invisible on
+// the light theme. Driven by our CSS vars (--text is dark on light, light on
+// dark), so it follows the toggle.
+function mermaidConfig() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = n => cs.getPropertyValue(n).trim();
+  const text = v('--text'), line = v('--line');
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      fontFamily: v('--font-body') || 'sans-serif',
+      // Title + legend sit on the modal background, so follow the theme text colour.
+      textColor: text,
+      pieTitleTextColor: text,
+      pieLegendTextColor: text,
+      // Slice values sit on the (always light) pastel wedges, so keep them dark
+      // in both themes for contrast — matching mermaid's own default.
+      pieSectionTextColor: '#1a1a2e',
+      pieStrokeColor: line,
+      pieOuterStrokeColor: line,
+    },
+  };
 }
 
 function memberModal(m) {
@@ -1631,6 +1656,7 @@ async function renderSplitChart(box, e, shares) {
   if (!shares.length) { box.style.display = 'none'; return; }
   try {
     const mermaid = await getMermaid();
+    mermaid.initialize(mermaidConfig());  // re-apply each render so it tracks the current theme
     const safe = s => (s + '').replace(/["\n]/g, ' ').slice(0, 40);
     const def = 'pie showData\n  title Split — ' + safe(e.description) + '\n' +
       shares.map(s => `  "${safe(s.name)}" : ${(s.share_paise / 100).toFixed(2)}`).join('\n');
