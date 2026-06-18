@@ -25,6 +25,14 @@ def client():
         yield c
 
 
+@pytest.fixture
+def client_no_raise():
+    """Like `client`, but unhandled server errors surface as 500 responses instead
+    of propagating — lets us assert the client-visible behaviour of a server failure."""
+    with TestClient(split_app, raise_server_exceptions=False) as c:
+        yield c
+
+
 def make_group(client, name="Trip", members=("Ada", "Bo", "Cy")):
     gid = client.post("/api/groups", json={"name": name}, auth=AUTH).json()["id"]
     ids = {}
@@ -524,3 +532,239 @@ async def test_answer_stream_yields_chunks(monkeypatch):
     monkeypatch.setattr(ask, "client", lambda: _Client())
     out = [c async for c in ask.answer_stream("ctx", [], "q")]
     assert out == ["chunk"]
+
+
+# ------------------------------------------------ offline writes / idempotent sync
+
+
+def test_expense_client_id_replay_is_idempotent(client):
+    """Replaying the same offline expense (same client_id) must not duplicate it."""
+    gid, ids = make_group(client)
+    body = {
+        "description": "Dinner", "amount": 30, "paid_by": ids["Ada"],
+        "client_id": "cid-exp-1",
+    }
+    first = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()
+    second = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()
+
+    assert first["id"] == second["id"]          # same row resolved
+    assert second.get("duplicate") is True      # flagged as a replay
+    assert "duplicate" not in first             # the original insert is not flagged
+
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert len(detail["expenses"]) == 1         # exactly one, despite two POSTs
+    net = {b["name"]: b["net_paise"] for b in detail["balances"]}
+    assert net == {"Ada": 2000, "Bo": -1000, "Cy": -1000}
+
+
+def test_distinct_client_ids_create_distinct_expenses(client):
+    gid, ids = make_group(client)
+    for cid in ("a", "b"):
+        client.post(
+            f"/api/groups/{gid}/expenses",
+            json={"description": "X", "amount": 9, "paid_by": ids["Ada"], "client_id": cid},
+            auth=AUTH,
+        )
+    assert len(client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"]) == 2
+
+
+def test_expense_without_client_id_still_works_and_repeats(client):
+    """No client_id => no dedup; two identical POSTs make two expenses (legacy path)."""
+    gid, ids = make_group(client)
+    body = {"description": "Tea", "amount": 6, "paid_by": ids["Ada"]}
+    client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH)
+    client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH)
+    assert len(client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"]) == 2
+
+
+def test_settlement_client_id_replay_is_idempotent(client):
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Lunch", "amount": 20, "paid_by": ids["Ada"]},
+        auth=AUTH,
+    )  # Bo owes Ada 10
+    body = {
+        "from_member": ids["Bo"], "to_member": ids["Ada"], "amount": 10,
+        "client_id": "cid-set-1",
+    }
+    first = client.post(f"/api/groups/{gid}/settlements", json=body, auth=AUTH).json()
+    second = client.post(f"/api/groups/{gid}/settlements", json=body, auth=AUTH).json()
+
+    assert first["id"] == second["id"]
+    assert second.get("duplicate") is True
+
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert len(detail["settlements"]) == 1            # one settlement, not two
+    assert all(b["net_paise"] == 0 for b in detail["balances"])  # not over-credited
+
+
+def test_offline_outbox_replay_exactly_once(client):
+    """Simulate flushing an offline outbox twice (a dropped-connection retry):
+    a mix of expenses + a settlement, each carrying a client_id. The second pass
+    must be a no-op, leaving balances identical."""
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    outbox = [
+        ("expenses", {"description": "Fuel", "amount": 40, "paid_by": ids["Ada"],
+                      "client_id": "o1"}),
+        ("expenses", {"description": "Snacks", "amount": 10, "paid_by": ids["Bo"],
+                      "client_id": "o2"}),
+        ("settlements", {"from_member": ids["Bo"], "to_member": ids["Ada"],
+                         "amount": 5, "client_id": "o3"}),
+    ]
+
+    def flush():
+        for path, body in outbox:
+            r = client.post(f"/api/groups/{gid}/{path}", json=body, auth=AUTH)
+            assert r.status_code == 200
+
+    flush()
+    after_first = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    flush()  # connection came back mid-flush last time; replay the whole queue
+    after_second = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+
+    assert len(after_first["expenses"]) == 2
+    assert len(after_first["settlements"]) == 1
+    assert {b["name"]: b["net_paise"] for b in after_first["balances"]} == \
+           {b["name"]: b["net_paise"] for b in after_second["balances"]}
+    assert len(after_second["expenses"]) == 2     # no duplicates from the replay
+    assert len(after_second["settlements"]) == 1
+
+
+def test_migration_adds_client_id_to_legacy_db(tmp_path):
+    """A DB created before client_id existed gains the columns + unique index,
+    and the dedup index then actually enforces uniqueness."""
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(
+        """
+        CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')));
+        CREATE TABLE members (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER, name TEXT);
+        CREATE TABLE expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER,
+            description TEXT, amount_paise INTEGER, paid_by INTEGER, added_by INTEGER,
+            created_at TEXT, deleted_at TEXT);
+        CREATE TABLE expense_shares (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            expense_id INTEGER, member_id INTEGER, share_paise INTEGER);
+        CREATE TABLE settlements (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER,
+            from_member INTEGER, to_member INTEGER, amount_paise INTEGER, created_at TEXT);
+        INSERT INTO groups (name) VALUES ('Old');
+        INSERT INTO members (group_id, name) VALUES (1, 'Ada');
+        INSERT INTO expenses (group_id, description, amount_paise, paid_by) VALUES (1, 'X', 100, 1);
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    db.init_db(path)  # run the real migration
+
+    conn = db.connect(path)
+    try:
+        ecols = {r["name"] for r in conn.execute("PRAGMA table_info(expenses)")}
+        scols = {r["name"] for r in conn.execute("PRAGMA table_info(settlements)")}
+        assert "client_id" in ecols and "client_id" in scols
+        # the pre-existing row survived
+        assert conn.execute("SELECT COUNT(*) c FROM expenses").fetchone()["c"] == 1
+        # the unique index is live: a duplicate non-null client_id is rejected
+        conn.execute("UPDATE expenses SET client_id = 'dup' WHERE id = 1")
+        conn.execute(
+            "INSERT INTO expenses (group_id, description, amount_paise, paid_by, client_id) "
+            "VALUES (1, 'Y', 200, 1, 'dupY')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE expenses SET client_id = 'dup' WHERE description = 'Y'")
+    finally:
+        conn.close()
+
+
+def test_migration_is_idempotent(tmp_path):
+    """Running init_db repeatedly on the same file must not error (re-add column / index)."""
+    path = tmp_path / "repeat.db"
+    db.init_db(path)
+    db.init_db(path)
+    db.init_db(path)
+    conn = db.connect(path)
+    try:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(expenses)")}
+        assert "client_id" in cols
+    finally:
+        conn.close()
+
+
+def test_multiple_people_add_offline_then_sync_merges_all(client):
+    """Several members each queue expenses offline (unique client_ids), then their
+    devices reconnect and replay — interleaved, and twice over to model a flaky
+    reconnect. Every expense must land exactly once; nothing lost or duplicated."""
+    gid, ids = make_group(client, members=("Ada", "Bo", "Cy"))
+    devices = {
+        "Ada": [
+            {"description": "Dinner", "amount": 30, "paid_by": ids["Ada"], "client_id": "ada-1"},
+            {"description": "Cab", "amount": 12, "paid_by": ids["Ada"], "client_id": "ada-2"},
+        ],
+        # Same description+amount as Ada's Dinner on purpose: only the client_id
+        # distinguishes them, so a naive dedup would wrongly drop one.
+        "Bo": [{"description": "Dinner", "amount": 30, "paid_by": ids["Bo"], "client_id": "bo-1"}],
+        "Cy": [{"description": "Snacks", "amount": 9, "paid_by": ids["Cy"], "client_id": "cy-1"}],
+    }
+
+    for _ in range(2):  # replay the whole set twice
+        for who, box in devices.items():
+            for body in box:
+                r = client.post(f"/api/groups/{gid}/expenses", json=body, auth=(who, TEST_PASSWORD))
+                assert r.status_code == 200
+
+    detail = client.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert len(detail["expenses"]) == 4  # 2 + 1 + 1, none lost, none doubled
+    # each member's contribution is attributed to them
+    adders = {e["added_by_name"] for e in detail["expenses"]}
+    assert adders == {"Ada", "Bo", "Cy"}
+    net = {b["name"]: b["net_paise"] for b in detail["balances"]}
+    assert net == {"Ada": 1500, "Bo": 300, "Cy": -1800}
+    assert sum(net.values()) == 0  # the ledger always reconciles
+
+
+def test_server_failure_loses_no_data_on_retry(client_no_raise, monkeypatch):
+    """If the server errors out mid-write (a 5xx), the client keeps the write queued
+    and retries. The failed attempt must persist nothing, and the retry (same
+    client_id) must create exactly one expense — no loss, no duplicate."""
+    import spliti.app as app_mod
+
+    gid, ids = make_group(client_no_raise)
+    body = {"description": "Cab", "amount": 12, "paid_by": ids["Ada"], "client_id": "retry-1"}
+
+    calls = {"n": 0}
+    real_split = app_mod.balances.split_equally
+
+    def flaky(amount, members):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom: simulated server failure")  # fails before any INSERT/commit
+        return real_split(amount, members)
+
+    monkeypatch.setattr(app_mod.balances, "split_equally", flaky)
+
+    failed = client_no_raise.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH)
+    assert failed.status_code == 500
+    # nothing was persisted by the failed attempt
+    assert client_no_raise.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"] == []
+
+    # the client retries the very same queued write -> succeeds, exactly one row
+    ok = client_no_raise.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH)
+    assert ok.status_code == 200
+    detail = client_no_raise.get(f"/api/groups/{gid}", auth=AUTH).json()
+    assert len(detail["expenses"]) == 1
+    assert detail["expenses"][0]["description"] == "Cab"
+
+
+def test_replay_after_lost_response_does_not_double(client):
+    """The server commits a write but the client never sees the 200 (response lost
+    after a successful write). On retry with the same client_id the server returns
+    the existing row — so the optimistic outbox flush is exactly-once."""
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    body = {"description": "Lunch", "amount": 20, "paid_by": ids["Ada"], "client_id": "lost-1"}
+    first = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()  # committed
+    again = client.post(f"/api/groups/{gid}/expenses", json=body, auth=AUTH).json()  # retry
+    assert again["id"] == first["id"] and again.get("duplicate") is True
+    assert len(client.get(f"/api/groups/{gid}", auth=AUTH).json()["expenses"]) == 1

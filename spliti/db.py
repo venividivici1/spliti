@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- who recorded the expense (the signed-in member); kept distinct from paid_by.
     -- NULL on rows created before this was tracked, or if that member is removed.
     added_by     INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    -- client-generated id for offline writes; lets a replayed POST be deduped so
+    -- syncing the offline outbox is idempotent (exactly-once effect). NULL for
+    -- rows created server-side before this existed / without a client.
+    client_id    TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     deleted_at   TEXT
 );
@@ -44,8 +48,21 @@ CREATE TABLE IF NOT EXISTS settlements (
     from_member  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
     to_member    INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
     amount_paise INTEGER NOT NULL,
+    -- client-generated id for offline writes (see expenses.client_id).
+    client_id    TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+"""
+
+# Dedup replayed offline writes: a given client_id can exist at most once.
+# Partial (WHERE NOT NULL) so legacy/server-side rows with NULL aren't constrained.
+# Created in _migrate (not SCHEMA) so the client_id columns are guaranteed to
+# exist first on databases that predate them.
+CLIENT_ID_INDEXES = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_client_id
+    ON expenses(client_id) WHERE client_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_settlements_client_id
+    ON settlements(client_id) WHERE client_id IS NOT NULL;
 """
 
 
@@ -86,3 +103,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE expenses ADD COLUMN added_by INTEGER REFERENCES members(id)"
         )
+    # client-generated id for idempotent offline write replay
+    if "client_id" not in cols("expenses"):
+        conn.execute("ALTER TABLE expenses ADD COLUMN client_id TEXT")
+    if "client_id" not in cols("settlements"):
+        conn.execute("ALTER TABLE settlements ADD COLUMN client_id TEXT")
+    # now that the columns exist on every DB, the unique indexes are safe to add
+    conn.executescript(CLIENT_ID_INDEXES)
