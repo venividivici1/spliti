@@ -284,6 +284,35 @@ def test_me_identifies_member_and_rejects_strangers(client):
     assert client.get("/api/me", auth=("Ada", "nope")).status_code == 401
 
 
+def test_csv_export(client):
+    gid, ids = make_group(client, members=("Ada", "Bo"))
+    client.post(
+        f"/api/groups/{gid}/expenses",
+        json={"description": "Dinner", "amount": 30, "paid_by": ids["Ada"]},
+        auth=AUTH,
+    )
+    client.post(
+        f"/api/groups/{gid}/settlements",
+        json={"from_member": ids["Bo"], "to_member": ids["Ada"], "amount": 10},
+        auth=AUTH,
+    )
+    r = client.get(f"/api/groups/{gid}/export/csv", auth=AUTH)
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers["content-disposition"]
+    body = r.text
+    assert "Dinner" in body
+    assert "Ada" in body
+    assert "Bo" in body
+    assert "Settlement" in body
+    assert "Balances" in body
+
+
+def test_csv_export_requires_auth(client):
+    gid, _ = make_group(client)
+    assert client.get(f"/api/groups/{gid}/export/csv").status_code == 401
+
+
 def test_non_member_cannot_add_expense(client):
     gid, ids = make_group(client, members=("Ada", "Bo"))
     r = client.post(

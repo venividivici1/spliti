@@ -4,6 +4,8 @@ Runs standalone (uvicorn spliti.app:split_app); was previously host-mounted in t
 Money crosses the API as decimal amounts but is stored/computed as integer paise.
 """
 
+import csv
+import io
 import secrets
 import sqlite3
 from pathlib import Path
@@ -546,6 +548,68 @@ def get_group(gid: int) -> dict:
     conn = db.connect()
     try:
         return _group_detail(conn, gid)
+    finally:
+        conn.close()
+
+
+@split_app.get("/api/groups/{gid}/export/csv", dependencies=[Depends(require_auth)])
+def export_csv(gid: int) -> StreamingResponse:
+    """Export all expenses (active + deleted) and settlements as a CSV download."""
+    conn = db.connect()
+    try:
+        group = _group_or_404(conn, gid)
+        detail = _group_detail(conn, gid)
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+
+        # Expenses sheet
+        writer.writerow(["Type", "Description", "Category", "Amount (₹)", "Paid By",
+                         "Added By", "Split Among", "Date", "Status"])
+        for e in detail["expenses"]:
+            shares_str = ", ".join(
+                f"{s['name']} (₹{s['share_paise']/100:.2f})" for s in e.get("shares", [])
+            )
+            writer.writerow([
+                "Expense",
+                e["description"],
+                e.get("category", "other"),
+                f"{e['amount_paise']/100:.2f}",
+                e["paid_by_name"],
+                e.get("added_by_name") or "",
+                shares_str,
+                e["created_at"],
+                "Deleted" if e["deleted"] else "Active",
+            ])
+
+        # Settlements
+        for s in detail["settlements"]:
+            writer.writerow([
+                "Settlement",
+                f"{s['from_name']} → {s['to_name']}",
+                "",
+                f"{s['amount_paise']/100:.2f}",
+                s["from_name"],
+                "",
+                s["to_name"],
+                s["created_at"],
+                "Active",
+            ])
+
+        # Balances summary
+        writer.writerow([])
+        writer.writerow(["--- Balances ---"])
+        writer.writerow(["Member", "Net Balance (₹)"])
+        for b in detail["balances"]:
+            writer.writerow([b["name"], f"{b['net_paise']/100:.2f}"])
+
+        buf.seek(0)
+        filename = f"spliti-{group['name'].lower().replace(' ', '-')}-expenses.csv"
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     finally:
         conn.close()
 

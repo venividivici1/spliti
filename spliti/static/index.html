@@ -1302,7 +1302,7 @@ function historySection(d) {
   });
   return `
     <div class="card">
-      <h2>History</h2>
+      <div class="overview-head"><h2>History</h2>${d.expenses.length ? `<button class="ghost sm" id="exportCsv">⬇ Export CSV</button>` : ''}</div>
       ${d.expenses.length ? groups.map(([k, items]) =>
         `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
       ).join('') : '<div class="muted">No expenses yet. Tap the ➕ button to add one.</div>'}
@@ -1467,6 +1467,17 @@ function wireTab() {
     $('#chatSuggest').querySelectorAll('button').forEach(b => b.onclick = () => sendChat(b.dataset.q));
   }
   if (activeTab === 'history') {
+    const csvBtn = $('#exportCsv');
+    if (csvBtn) csvBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = `/api/groups/${d.group.id}/export/csv`;
+      a.download = '';
+      // Add auth header via fetch, then trigger download
+      fetch(a.href, { headers: { 'Authorization': 'Basic ' + authToken } })
+        .then(r => r.blob())
+        .then(blob => { a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href); })
+        .catch(() => toast('Export failed'));
+    };
     $('#tabbody').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (!await confirmAction({ title:'Delete expense?',
         message:'It will be struck through and kept in history — you can undo it later.',
