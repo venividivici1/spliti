@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>System Health</title>
+<style>
+  :root{
+    --bg:#0b0f14; --card:#131a23; --card2:#0f151c; --line:#1f2a36;
+    --txt:#e6edf3; --dim:#8b98a5; --accent:#4cc2ff;
+    --ok:#3fb950; --warn:#d29922; --crit:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:16px;max-width:1100px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    flex-wrap:wrap;margin:4px 2px 18px}
+  h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+  .meta{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--crit);
+    margin-right:6px;vertical-align:middle;transition:background .3s}
+  .dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(248px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 15px}
+  .card h2{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--dim);
+    text-transform:uppercase;letter-spacing:.7px;display:flex;justify-content:space-between}
+  .big{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+  .big small{font-size:14px;color:var(--dim);font-weight:500;margin-left:2px}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:7px;font-variant-numeric:tabular-nums}
+  .bar{height:8px;border-radius:6px;background:var(--card2);overflow:hidden;margin-top:11px;
+    border:1px solid var(--line)}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent);
+    transition:width .5s ease,background .3s}
+  .cores{display:grid;grid-template-columns:repeat(auto-fill,minmax(26px,1fr));gap:4px;margin-top:11px}
+  .core{height:34px;background:var(--card2);border:1px solid var(--line);border-radius:5px;
+    position:relative;overflow:hidden}
+  .core>i{position:absolute;bottom:0;left:0;right:0;height:0;background:var(--accent);
+    transition:height .5s ease,background .3s}
+  .kv{display:flex;justify-content:space-between;margin-top:7px;font-variant-numeric:tabular-nums}
+  .kv span:first-child{color:var(--dim)}
+  .net{display:flex;gap:18px;font-variant-numeric:tabular-nums}
+  .net div{flex:1}
+  .net .big{font-size:21px}
+  .arrow{color:var(--dim);font-size:12px;margin-right:4px}
+  /* login overlay */
+  #login{position:fixed;inset:0;background:rgba(5,8,12,.86);display:none;
+    align-items:center;justify-content:center;padding:20px}
+  #login.show{display:flex}
+  #login form{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:22px;width:300px;max-width:100%}
+  #login h3{margin:0 0 4px;font-size:16px}
+  #login p{margin:0 0 14px;color:var(--dim);font-size:12.5px}
+  #login input{width:100%;padding:10px 12px;border-radius:9px;border:1px solid var(--line);
+    background:var(--card2);color:var(--txt);font-size:14px}
+  #login button{width:100%;margin-top:10px;padding:10px;border:0;border-radius:9px;
+    background:var(--accent);color:#04121c;font-weight:650;font-size:14px;cursor:pointer}
+  #login .err{color:var(--crit);font-size:12.5px;margin-top:8px;min-height:16px}
+</style>
+</head>
+<body>
+<header>
+  <h1>System Health <span class="meta" id="host"></span></h1>
+  <div class="meta"><span class="dot" id="dot"></span><span id="status">connecting…</span> · up <span id="uptime">—</span></div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>CPU <span id="cpuCount" class="meta"></span></h2>
+    <div class="big"><span id="cpuPct">—</span><small>%</small></div>
+    <div class="sub">load <span id="load">—</span></div>
+    <div class="cores" id="cores"></div>
+  </div>
+
+  <div class="card">
+    <h2>Memory <span id="memPctTag" class="meta"></span></h2>
+    <div class="big"><span id="memUsed">—</span> <small>/ <span id="memTotal">—</span></small></div>
+    <div class="bar"><i id="memBar"></i></div>
+    <div class="kv"><span>available</span><span id="memAvail">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Disk (/) <span id="diskPctTag" class="meta"></span></h2>
+    <div class="big"><span id="diskUsed">—</span> <small>/ <span id="diskTotal">—</span></small></div>
+    <div class="bar"><i id="diskBar"></i></div>
+    <div class="kv"><span>free</span><span id="diskFree">—</span></div>
+    <div class="kv"><span>read / write</span><span id="diskIO">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Network</h2>
+    <div class="net">
+      <div><div class="meta"><span class="arrow">▼</span>down</div><div class="big" id="netDown">—</div></div>
+      <div><div class="meta"><span class="arrow">▲</span>up</div><div class="big" id="netUp">—</div></div>
+    </div>
+    <div class="kv"><span>total recv / sent</span><span id="netTotal">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Swap <span id="swapPctTag" class="meta"></span></h2>
+    <div class="big"><span id="swapUsed">—</span> <small>/ <span id="swapTotal">—</span></small></div>
+    <div class="bar"><i id="swapBar"></i></div>
+  </div>
+</div>
+
+<div id="login"><form id="loginForm">
+  <h3>System Health</h3>
+  <p>Enter the Spliti password to view live metrics.</p>
+  <input id="pw" type="password" autocomplete="current-password" placeholder="Password" autofocus>
+  <button type="submit">View</button>
+  <div class="err" id="loginErr"></div>
+</form></div>
+
+<script>
+const AUTH_KEY = 'spliti_auth';   // shared with the spliti app (base64 user:pass)
+const $ = id => document.getElementById(id);
+
+function fmtBytes(n){
+  if(n==null) return '—';
+  const u=['B','KB','MB','GB','TB']; let i=0; n=+n;
+  while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+  return (i===0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+}
+const fmtRate = n => fmtBytes(n) + '/s';
+function fmtUptime(s){
+  s=+s; const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
+  return (d?d+'d ':'') + (h?h+'h ':'') + m + 'm';
+}
+function band(p){ return p>=90 ? 'var(--crit)' : p>=70 ? 'var(--warn)' : 'var(--accent)'; }
+function setBar(el, pct){ el.style.width = Math.min(100,Math.max(0,pct)) + '%'; el.style.background = band(pct); }
+
+function render(d){
+  $('host').textContent = '· ' + d.host;
+  $('uptime').textContent = fmtUptime(d.uptime_sec);
+
+  const c = d.cpu;
+  $('cpuPct').textContent = c.percent.toFixed(0);
+  $('cpuCount').textContent = c.count ? c.count + ' cores' : '';
+  $('load').textContent = c.load_avg ? c.load_avg.map(x=>x.toFixed(2)).join(' · ') : '—';
+  const cores = $('cores');
+  if(cores.children.length !== (c.per_core||[]).length){
+    cores.innerHTML = (c.per_core||[]).map(()=>'<div class="core"><i></i></div>').join('');
+  }
+  (c.per_core||[]).forEach((p,i)=>{
+    const bar = cores.children[i].firstChild;
+    bar.style.height = Math.min(100,p) + '%'; bar.style.background = band(p);
+  });
+
+  const m = d.memory;
+  $('memUsed').textContent = fmtBytes(m.used); $('memTotal').textContent = fmtBytes(m.total);
+  $('memAvail').textContent = fmtBytes(m.available); $('memPctTag').textContent = m.percent.toFixed(0)+'%';
+  setBar($('memBar'), m.percent);
+
+  const k = d.disk;
+  $('diskUsed').textContent = fmtBytes(k.used); $('diskTotal').textContent = fmtBytes(k.total);
+  $('diskFree').textContent = fmtBytes(k.free); $('diskPctTag').textContent = k.percent.toFixed(0)+'%';
+  $('diskIO').textContent = fmtRate(k.read_bps) + ' / ' + fmtRate(k.write_bps);
+  setBar($('diskBar'), k.percent);
+
+  const n = d.network;
+  $('netDown').textContent = fmtRate(n.recv_bps); $('netUp').textContent = fmtRate(n.sent_bps);
+  $('netTotal').textContent = fmtBytes(n.bytes_recv) + ' / ' + fmtBytes(n.bytes_sent);
+
+  const s = d.swap;
+  $('swapUsed').textContent = fmtBytes(s.used); $('swapTotal').textContent = fmtBytes(s.total);
+  $('swapPctTag').textContent = s.total ? s.percent.toFixed(0)+'%' : 'none';
+  setBar($('swapBar'), s.percent);
+}
+
+function setLive(on, text){
+  $('dot').classList.toggle('live', on);
+  $('status').textContent = text || (on ? 'live' : 'reconnecting…');
+}
+function showLogin(err){
+  $('loginErr').textContent = err || '';
+  $('login').classList.add('show'); $('pw').focus();
+}
+
+let running = false;
+async function connect(){
+  if(running) return; running = true;
+  const token = localStorage.getItem(AUTH_KEY);
+  if(!token){ running = false; showLogin(); return; }
+  try{
+    const resp = await fetch('/health/stream', { headers:{ Authorization:'Basic '+token } });
+    if(resp.status === 401){
+      localStorage.removeItem(AUTH_KEY); running = false; showLogin('Wrong password.'); return;
+    }
+    if(!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
+    $('login').classList.remove('show'); setLive(true, 'live');
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    while(true){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while((i = buf.indexOf('\n\n')) >= 0){
+        const evt = buf.slice(0, i); buf = buf.slice(i + 2);
+        const line = evt.split('\n').find(l => l.startsWith('data:'));
+        if(line){ try{ render(JSON.parse(line.slice(5).trim())); }catch(_){} }
+      }
+    }
+  }catch(_){ /* network blip */ }
+  running = false; setLive(false);
+  setTimeout(connect, 2000);   // auto-reconnect
+}
+
+$('loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const pw = $('pw').value;
+  if(!pw) return;
+  // username is ignored server-side; store under the shared key so spliti reuses it
+  localStorage.setItem(AUTH_KEY, btoa(unescape(encodeURIComponent('health:' + pw))));
+  $('pw').value = '';
+  connect();
+});
+
+// pause the stream when the tab is hidden, resume when visible (saves resources)
+document.addEventListener('visibilitychange', () => { if(!document.hidden) connect(); });
+connect();
+</script>
+</body>
+</html>
