@@ -4,7 +4,7 @@
 //     (so the app opens offline; live data still needs the network).
 //   - static assets (icons/manifest): cache-first.
 //   - everything else (the /api/* JSON, AI streams): straight to network.
-const VERSION = 'spliti-v4';
+const VERSION = 'spliti-v5';
 const SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -73,4 +73,46 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Everything else (API/JSON/streams): network, no caching.
+});
+
+// ---- Web Push ----
+// If the app is open and on-screen, sync in place instead of interrupting with a
+// banner (the page reuses its normal flush()). Otherwise — closed, backgrounded,
+// or a hidden tab — show the notification. Suppressing the banner is allowed by
+// the userVisibleOnly contract precisely because a visible client exists.
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (_) { /* keep defaults */ }
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const visible = wins.find((c) => c.visibilityState === 'visible');
+    if (visible) {
+      visible.postMessage({ type: 'sync' });
+      return;
+    }
+    await self.registration.showNotification(d.title || 'Spliti', {
+      body: d.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: d.tag || 'spliti',
+      data: { url: d.url || '/' },
+    });
+  })());
+});
+
+// Tapping a notification focuses an already-open window (and nudges it to sync)
+// or opens the app.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of wins) {
+      if ('focus' in c) {
+        c.postMessage({ type: 'sync' });
+        return c.focus();
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(url);
+  })());
 });
