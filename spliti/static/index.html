@@ -388,6 +388,37 @@
   .fair-bar { position: absolute; height: 14px; border-radius: 4px; top: 3px; transition: width 0.5s ease, left 0.5s ease; }
   .fair-val { font-size: 0.75rem; color: var(--muted); min-width: 60px; text-align: right; }
 
+  /* ---- history search & filter ---- */
+  .hist-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; padding-top: 4px; }
+  .hist-search { display: flex; gap: 8px; align-items: center; }
+  .hist-search input { flex: 1 1 auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; color: var(--text) !important; font-size: 0.95rem; min-width: 150px;
+    -webkit-text-fill-color: var(--text); caret-color: var(--accent); box-sizing: border-box;
+    direction: ltr; text-align: left; }
+  .hist-search input::placeholder { color: var(--muted); }
+  .hist-sort { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; color: var(--text); font-size: 0.85rem; flex: 0 0 auto; width: auto; }
+  .filter-row { display: flex; gap: 6px; padding: 2px 0 2px 48px; align-items: center; flex-wrap: wrap;
+    position: relative; }
+  .filter-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 600;
+    letter-spacing: 0.5px; width: 42px; position: absolute; left: 0; }
+  .fchip { background: var(--panel2); border: 1px solid var(--line); border-radius: 16px;
+    padding: 4px 10px; font-size: 0.78rem; color: var(--muted); cursor: pointer;
+    white-space: nowrap; transition: all 0.15s ease; }
+  .fchip.on { background: var(--accent); color: var(--btn-text); border-color: var(--accent); }
+  .fchip .fchip-emoji { margin-right: 2px; }
+  .hist-count { font-size: 0.75rem; color: var(--muted); margin-top: 2px; display: flex;
+    align-items: center; gap: 8px; padding-left: 48px; }
+  .filter-clear { background: none; border: 1px solid var(--line); border-radius: 16px;
+    padding: 4px 10px; font-size: 0.75rem; color: var(--red); cursor: pointer; flex-shrink: 0; }
+
+  /* date range picker */
+  .date-range-inputs { display: flex; align-items: center; gap: 8px; padding-left: 48px; margin-top: 2px; }
+  .date-input { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; color: var(--text); font-size: 0.85rem; color-scheme: dark; }
+  [data-theme="light"] .date-input { color-scheme: light; }
+  .date-sep { color: var(--muted); font-size: 0.85rem; }
+
   /* ---- bottom navigation ---- */
   .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex;
     background: var(--nav-bg); backdrop-filter: blur(12px);
@@ -1590,20 +1621,142 @@ function expRow(e) {
     </div>`;
 }
 
+// ---- history filter state ----
+let histFilter = {
+  query: '',
+  cats: new Set(),       // empty = all
+  members: new Set(),    // empty = all
+  dateRange: 'all',      // 'today' | 'week' | 'custom' | 'all'
+  dateFrom: '',          // YYYY-MM-DD for custom range
+  dateTo: '',            // YYYY-MM-DD for custom range
+  sort: 'newest',        // 'newest' | 'oldest' | 'highest' | 'lowest'
+  showDeleted: true,
+};
+
+function applyHistFilter(expenses) {
+  let list = [...expenses];
+  const q = histFilter.query.toLowerCase().trim();
+  if (q) list = list.filter(e =>
+    e.description.toLowerCase().includes(q) || (e.paid_by_name||'').toLowerCase().includes(q)
+  );
+  if (histFilter.cats.size) list = list.filter(e => histFilter.cats.has(e.category || 'other'));
+  if (histFilter.members.size) list = list.filter(e => histFilter.members.has(e.paid_by_name));
+  if (!histFilter.showDeleted) list = list.filter(e => !e.deleted);
+  if (histFilter.dateRange !== 'all') {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    if (histFilter.dateRange === 'today') {
+      list = list.filter(e => istDateKey(e.created_at) === today);
+    } else if (histFilter.dateRange === 'week') {
+      const week = new Date(Date.now() - 6 * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      list = list.filter(e => istDateKey(e.created_at) >= week);
+    } else if (histFilter.dateRange === 'custom') {
+      const from = histFilter.dateFrom, to = histFilter.dateTo;
+      list = list.filter(e => {
+        const k = istDateKey(e.created_at);
+        return (!from || k >= from) && (!to || k <= to);
+      });
+    }
+  }
+  if (histFilter.sort === 'oldest') list.sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+  else if (histFilter.sort === 'newest') list.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  else if (histFilter.sort === 'highest') list.sort((a,b) => b.amount_paise - a.amount_paise);
+  else if (histFilter.sort === 'lowest') list.sort((a,b) => a.amount_paise - b.amount_paise);
+  return list;
+}
+
+function wireHistoryActions(d) {
+  const scope = $('#histResults') || $('#tabbody');
+  if (!scope) return;
+  scope.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!await confirmAction({ title:'Delete expense?',
+      message:'It will be struck through and kept in history — you can undo it later.',
+      ok:'Delete', danger:true })) return;
+    const eid = b.dataset.del;
+    const exp = d.expenses.find(x => String(x.id) === String(eid));
+    if (exp && exp.pending) {
+      outbox = outbox.filter(o => !(o.kind === 'expense' && o.client_id === exp.client_id));
+      saveOutbox();
+      d.expenses = d.expenses.filter(x => x !== exp);
+      recomputeDetail(d); saveSnapshot(); renderMain();
+      toast('Expense removed');
+      return;
+    }
+    queueMutation({ kind: 'delete', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, true));
+    toast('Expense deleted');
+  });
+  scope.querySelectorAll('[data-undel]').forEach(b => b.onclick = async () => {
+    if (!await confirmAction({ title:'Restore expense?',
+      message:'This expense will count toward balances again.', ok:'Restore' })) return;
+    const eid = b.dataset.undel;
+    queueMutation({ kind: 'restore', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, false));
+    toast('Expense restored');
+  });
+  scope.querySelectorAll('[data-exp]').forEach(row => row.onclick = ev => {
+    if (ev.target.closest('button')) return;
+    const e = d.expenses.find(x => String(x.id) === String(row.dataset.exp));
+    if (e) expenseModal(e);
+  });
+}
+
 function historySection(d) {
-  // group expenses by IST date, preserving newest-first order
+  const filtered = applyHistFilter(d.expenses);
+  const totalCount = d.expenses.length;
+  const isFiltered = histFilter.query || histFilter.cats.size || histFilter.members.size || histFilter.dateRange !== 'all';
+
+  // group by IST date
   const groups = [], seen = {};
-  d.expenses.forEach(e => {
+  filtered.forEach(e => {
     const k = istDateKey(e.created_at);
     if (!seen[k]) { seen[k] = []; groups.push([k, seen[k]]); }
     seen[k].push(e);
   });
+
+  // unique members for filter chips
+  const memberNames = [...new Set(d.expenses.map(e => e.paid_by_name).filter(Boolean))];
+  // active categories in data
+  const activeCats = [...new Set(d.expenses.map(e => e.category || 'other'))];
+
+  const catChips = activeCats.map(c =>
+    `<button class="fchip${histFilter.cats.has(c)?' on':''}" data-fcat="${c}"><span class="fchip-emoji">${catEmoji(c)}</span>${(CATEGORIES[c]||CATEGORIES.other).label}</button>`
+  ).join('');
+
+  const memberChips = memberNames.map(name =>
+    `<button class="fchip${histFilter.members.has(name)?' on':''}" data-fmember="${name}">${avatar(name,18)} ${esc(name)}</button>`
+  ).join('');
+
+  const dateChips = [['all','All'],['today','Today'],['week','This Week'],['custom','📅 Range']].map(([v,l]) =>
+    `<button class="fchip${histFilter.dateRange===v?' on':''}" data-fdate="${v}">${l}</button>`
+  ).join('');
+  const dateInputs = histFilter.dateRange === 'custom' ? `<div class="date-range-inputs">
+    <input type="date" id="dateFrom" class="date-input" value="${histFilter.dateFrom}" />
+    <span class="date-sep">→</span>
+    <input type="date" id="dateTo" class="date-input" value="${histFilter.dateTo}" />
+  </div>` : '';
+
+  const expenseList = filtered.length ? groups.map(([k, items]) =>
+    `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
+  ).join('') : `<div class="muted">${totalCount ? 'No expenses match your filters.' : 'No expenses yet. Tap the ➕ button to add one.'}</div>`;
+
   return `
     <div class="card">
-      <div class="overview-head"><h2>History</h2>${d.expenses.length ? `<button class="ghost sm" id="exportCsv">⬇ Export CSV</button>` : ''}</div>
-      ${d.expenses.length ? groups.map(([k, items]) =>
-        `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
-      ).join('') : '<div class="muted">No expenses yet. Tap the ➕ button to add one.</div>'}
+      <div class="overview-head" style="margin-bottom:12px"><h2>History</h2>${totalCount ? `<button class="ghost sm" id="exportCsv">⬇ Export CSV</button>` : ''}</div>
+      <div class="hist-toolbar">
+        <div class="hist-search">
+          <input id="histSearch" dir="ltr" type="text" autocomplete="off" placeholder="Search expenses..." />
+          <select class="hist-sort" id="histSort">
+            <option value="newest"${histFilter.sort==='newest'?' selected':''}>↕ Newest</option>
+            <option value="oldest"${histFilter.sort==='oldest'?' selected':''}>↕ Oldest</option>
+            <option value="highest"${histFilter.sort==='highest'?' selected':''}>↕ High ₹</option>
+            <option value="lowest"${histFilter.sort==='lowest'?' selected':''}>↕ Low ₹</option>
+          </select>
+        </div>
+        ${activeCats.length > 1 ? `<div class="filter-row"><span class="filter-label">Type</span>${catChips}</div>` : ''}
+        ${memberNames.length > 1 ? `<div class="filter-row"><span class="filter-label">Paid</span>${memberChips}</div>` : ''}
+        <div class="filter-row"><span class="filter-label">When</span>${dateChips}</div>
+        ${dateInputs}
+        ${isFiltered ? `<div class="hist-count">Showing ${filtered.length} of ${totalCount} expenses <button class="filter-clear" id="clearFilters">✕ Clear all filters</button></div>` : ''}
+      </div>
+      <div id="histResults">${expenseList}</div>
     </div>
     ${d.settlements.length ? `
     <div class="card">
@@ -1770,6 +1923,61 @@ function wireTab() {
     $('#chatSuggest').querySelectorAll('button').forEach(b => b.onclick = () => sendChat(b.dataset.q));
   }
   if (activeTab === 'history') {
+    // Search & filter wiring
+    const searchInput = $('#histSearch');
+    if (searchInput) {
+      searchInput.value = histFilter.query;
+      searchInput.addEventListener('input', () => {
+        histFilter.query = searchInput.value;
+        // Only update the results, not the whole tab
+        const d = state.detail;
+        const filtered = applyHistFilter(d.expenses);
+        const groups = [], seen = {};
+        filtered.forEach(e => {
+          const k = istDateKey(e.created_at);
+          if (!seen[k]) { seen[k] = []; groups.push([k, seen[k]]); }
+          seen[k].push(e);
+        });
+        const resultsDiv = $('#histResults');
+        if (resultsDiv) {
+          resultsDiv.innerHTML = filtered.length ? groups.map(([k, items]) =>
+            `<div class="date-head">${relDate(k)}</div>` + items.map(expRow).join('')
+          ).join('') : `<div class="muted">${d.expenses.length ? 'No expenses match your filters.' : 'No expenses yet.'}</div>`;
+          // Re-wire delete/undo/click handlers on new results
+          wireHistoryActions(d);
+        }
+        // Update count
+        const countDiv = $('#tabbody').querySelector('.hist-count');
+        const isFiltered = histFilter.query || histFilter.cats.size || histFilter.members.size || histFilter.dateRange !== 'all';
+        if (countDiv) countDiv.textContent = isFiltered ? `Showing ${filtered.length} of ${d.expenses.length} expenses` : '';
+      });
+    }
+    const sortSelect = $('#histSort');
+    if (sortSelect) sortSelect.onchange = () => { histFilter.sort = sortSelect.value; renderTab(); };
+    $('#tabbody').querySelectorAll('[data-fcat]').forEach(b => b.onclick = () => {
+      const c = b.dataset.fcat;
+      histFilter.cats.has(c) ? histFilter.cats.delete(c) : histFilter.cats.add(c);
+      renderTab();
+    });
+    $('#tabbody').querySelectorAll('[data-fmember]').forEach(b => b.onclick = () => {
+      const m = b.dataset.fmember;
+      histFilter.members.has(m) ? histFilter.members.delete(m) : histFilter.members.add(m);
+      renderTab();
+    });
+    $('#tabbody').querySelectorAll('[data-fdate]').forEach(b => b.onclick = () => {
+      histFilter.dateRange = b.dataset.fdate;
+      renderTab();
+    });
+    const dateFrom = $('#dateFrom'), dateTo = $('#dateTo');
+    if (dateFrom) dateFrom.onchange = () => { histFilter.dateFrom = dateFrom.value; renderTab(); };
+    if (dateTo) dateTo.onchange = () => { histFilter.dateTo = dateTo.value; renderTab(); };
+    const clearBtn = $('#clearFilters');
+    if (clearBtn) clearBtn.onclick = () => {
+      histFilter.query = ''; histFilter.cats.clear(); histFilter.members.clear();
+      histFilter.dateRange = 'all'; histFilter.dateFrom = ''; histFilter.dateTo = '';
+      histFilter.sort = 'newest';
+      renderTab();
+    };
     const csvBtn = $('#exportCsv');
     if (csvBtn) csvBtn.onclick = () => {
       const a = document.createElement('a');
@@ -1781,37 +1989,7 @@ function wireTab() {
         .then(blob => { a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href); })
         .catch(() => toast('Export failed'));
     };
-    $('#tabbody').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-      if (!await confirmAction({ title:'Delete expense?',
-        message:'It will be struck through and kept in history — you can undo it later.',
-        ok:'Delete', danger:true })) return;
-      const eid = b.dataset.del;
-      const exp = d.expenses.find(x => String(x.id) === String(eid));
-      // Never synced yet: drop the queued add and remove it locally — there's no
-      // server row to delete, so we don't enqueue a delete for a phantom id.
-      if (exp && exp.pending) {
-        outbox = outbox.filter(o => !(o.kind === 'expense' && o.client_id === exp.client_id));
-        saveOutbox();
-        d.expenses = d.expenses.filter(x => x !== exp);
-        recomputeDetail(d); saveSnapshot(); renderMain();
-        toast('Expense removed');
-        return;
-      }
-      queueMutation({ kind: 'delete', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, true));
-      toast('Expense deleted');
-    });
-    $('#tabbody').querySelectorAll('[data-undel]').forEach(b => b.onclick = async () => {
-      if (!await confirmAction({ title:'Restore expense?',
-        message:'This expense will count toward balances again.', ok:'Restore' })) return;
-      const eid = b.dataset.undel;
-      queueMutation({ kind: 'restore', gid: d.group.id, eid }, dd => localSetDeleted(dd, eid, false));
-      toast('Expense restored');
-    });
-    $('#tabbody').querySelectorAll('[data-exp]').forEach(row => row.onclick = ev => {
-      if (ev.target.closest('button')) return;  // let delete/undo buttons work
-      const e = d.expenses.find(x => String(x.id) === String(row.dataset.exp));  // ids may be uuids (pending) or ints
-      if (e) expenseModal(e);
-    });
+    wireHistoryActions(d);
   }
   if (activeTab === 'balance') {
     const ms = $('#manualSettle');
